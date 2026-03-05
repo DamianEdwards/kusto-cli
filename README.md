@@ -1,10 +1,10 @@
-# kusto
+# `kusto`
 
-A native AOT-first C# command-line tool for Azure Data Explorer (Kusto), built on the latest stable `System.CommandLine`.
+A native command-line tool for Azure Data Explorer (Kusto).
 
 ## Project status
 
-Planning is complete. Implementation is next, starting with solution scaffolding and command surface setup.
+Planning is complete. Implementation is next.
 
 ## Planned capabilities
 
