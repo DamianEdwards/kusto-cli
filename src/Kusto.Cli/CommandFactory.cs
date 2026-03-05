@@ -206,14 +206,26 @@ public static class CommandFactory
         {
             Description = "Cluster name or URL to use."
         };
+        var filterOption = new Option<string?>("--filter")
+        {
+            Description = "Filter by database name. Use ^prefix for startswith and suffix$ for endswith."
+        };
+        var takeOption = new Option<int?>("--take")
+        {
+            Description = "Maximum number of databases to return."
+        };
 
         var databaseCommand = new Command("database", "Manage databases and defaults.");
 
         var listCommand = new Command("list", "List databases.");
         listCommand.Add(clusterOption);
+        listCommand.Add(filterOption);
+        listCommand.Add(takeOption);
         listCommand.SetAction((parseResult, cancellationToken) =>
         {
             var clusterReference = parseResult.GetValue(clusterOption);
+            var filterValue = parseResult.GetValue(filterOption);
+            var takeValue = parseResult.GetValue(takeOption);
             var format = parseResult.GetRequiredValue(formatOption);
             var logLevel = parseResult.GetValue(logLevelOption);
 
@@ -221,11 +233,13 @@ public static class CommandFactory
             {
                 var config = await runtime.ConfigStore.LoadAsync(ct);
                 var resolvedCluster = runtime.ConnectionResolver.ResolveCluster(config, clusterReference);
+                var query = ListQueryBuilder.Build(".show databases | project DatabaseName", "DatabaseName", filterValue, takeValue);
 
                 var databases = await runtime.KustoService.ExecuteManagementCommandAsync(
                     resolvedCluster.Url,
                     null,
-                    ".show databases | project DatabaseName",
+                    query.Command,
+                    query.Parameters,
                     ct);
 
                 var rows = new List<IReadOnlyList<string?>>();
@@ -264,7 +278,7 @@ public static class CommandFactory
                 var config = await runtime.ConfigStore.LoadAsync(ct);
                 var resolvedCluster = runtime.ConnectionResolver.ResolveCluster(config, clusterReference);
                 var command = $".show databases details | where DatabaseName =~ '{EscapeKustoLiteral(databaseName)}'";
-                var result = await runtime.KustoService.ExecuteManagementCommandAsync(resolvedCluster.Url, null, command, ct);
+                var result = await runtime.KustoService.ExecuteManagementCommandAsync(resolvedCluster.Url, null, command, null, ct);
 
                 if (result.Rows.Count == 0)
                 {
@@ -293,7 +307,7 @@ public static class CommandFactory
                 var config = await runtime.ConfigStore.LoadAsync(ct);
                 var resolvedCluster = runtime.ConnectionResolver.ResolveCluster(config, clusterReference);
                 var verifyCommand = $".show databases details | where DatabaseName =~ '{EscapeKustoLiteral(databaseName)}'";
-                var result = await runtime.KustoService.ExecuteManagementCommandAsync(resolvedCluster.Url, null, verifyCommand, ct);
+                var result = await runtime.KustoService.ExecuteManagementCommandAsync(resolvedCluster.Url, null, verifyCommand, null, ct);
                 if (result.Rows.Count == 0)
                 {
                     throw new UserFacingException($"Database '{databaseName}' was not found.");
@@ -326,16 +340,28 @@ public static class CommandFactory
         {
             Description = "Database name to use."
         };
+        var filterOption = new Option<string?>("--filter")
+        {
+            Description = "Filter by table name. Use ^prefix for startswith and suffix$ for endswith."
+        };
+        var takeOption = new Option<int?>("--take")
+        {
+            Description = "Maximum number of tables to return."
+        };
 
         var tableCommand = new Command("table", "Browse tables and schemas.");
 
         var listCommand = new Command("list", "List tables in a database.");
         listCommand.Add(clusterOption);
         listCommand.Add(databaseOption);
+        listCommand.Add(filterOption);
+        listCommand.Add(takeOption);
         listCommand.SetAction((parseResult, cancellationToken) =>
         {
             var clusterReference = parseResult.GetValue(clusterOption);
             var databaseName = parseResult.GetValue(databaseOption);
+            var filterValue = parseResult.GetValue(filterOption);
+            var takeValue = parseResult.GetValue(takeOption);
             var format = parseResult.GetRequiredValue(formatOption);
             var logLevel = parseResult.GetValue(logLevelOption);
 
@@ -344,14 +370,20 @@ public static class CommandFactory
                 var config = await runtime.ConfigStore.LoadAsync(ct);
                 var resolvedCluster = runtime.ConnectionResolver.ResolveCluster(config, clusterReference);
                 var resolvedDatabase = runtime.ConnectionResolver.ResolveDatabase(config, resolvedCluster.Url, databaseName);
+                var query = ListQueryBuilder.Build(".show tables | project TableName", "TableName", filterValue, takeValue);
 
                 var result = await runtime.KustoService.ExecuteManagementCommandAsync(
                     resolvedCluster.Url,
                     resolvedDatabase,
-                    ".show tables | project TableName",
+                    query.Command,
+                    query.Parameters,
                     ct);
 
-                return new CliOutput { Table = result };
+                return new CliOutput
+                {
+                    Table = result,
+                    IsQueryResultTable = true
+                };
             }, cancellationToken);
         });
 
@@ -383,6 +415,7 @@ public static class CommandFactory
                     resolvedCluster.Url,
                     resolvedDatabase,
                     command,
+                    null,
                     ct);
 
                 if (result.Rows.Count == 0)

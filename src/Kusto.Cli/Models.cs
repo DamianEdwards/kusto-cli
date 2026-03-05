@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Kusto.Cli;
 
@@ -7,6 +8,8 @@ public sealed class CliOutput
     public string? Message { get; init; }
     public TabularData? Table { get; init; }
     public Dictionary<string, string?>? Properties { get; init; }
+    [JsonIgnore]
+    public bool IsQueryResultTable { get; init; }
 }
 
 public sealed class TabularData
@@ -61,6 +64,13 @@ internal sealed class KustoRequestPayload
 {
     public string Db { get; set; } = string.Empty;
     public string Csl { get; set; } = string.Empty;
+    public KustoRequestProperties? Properties { get; set; }
+}
+
+internal sealed class KustoRequestProperties
+{
+    [JsonPropertyName("Parameters")]
+    public Dictionary<string, string>? Parameters { get; set; }
 }
 
 internal sealed class KustoResponsePayload

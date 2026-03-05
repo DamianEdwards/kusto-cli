@@ -20,7 +20,7 @@ public static class CliRunner
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(ErrorMapper.Map(ex));
+            ConsoleOutput.WriteError(ErrorMapper.Map(ex));
             return 1;
         }
 
@@ -40,7 +40,7 @@ public static class CliRunner
         catch (Exception ex)
         {
             runtime.Logger.LogError(ex, "Command execution failed.");
-            Console.Error.WriteLine(ErrorMapper.Map(ex));
+            ConsoleOutput.WriteError(ErrorMapper.Map(ex));
             return 1;
         }
     }

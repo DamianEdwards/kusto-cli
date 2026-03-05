@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -11,10 +12,29 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
     private readonly ITokenProvider _tokenProvider = tokenProvider;
     private readonly ILogger<KustoHttpService> _logger = logger;
 
-    public Task<TabularData> ExecuteManagementCommandAsync(string clusterUrl, string? database, string command, CancellationToken cancellationToken)
+    public Task<TabularData> ExecuteManagementCommandAsync(
+        string clusterUrl,
+        string? database,
+        string command,
+        IReadOnlyDictionary<string, string>? queryParameters,
+        CancellationToken cancellationToken)
     {
         var db = string.IsNullOrWhiteSpace(database) ? "NetDefaultDB" : database;
-        return ExecuteAsync(clusterUrl, "/v1/rest/mgmt", new KustoRequestPayload { Db = db, Csl = command }, cancellationToken);
+        var payload = new KustoRequestPayload
+        {
+            Db = db,
+            Csl = command
+        };
+
+        if (queryParameters is { Count: > 0 })
+        {
+            payload.Properties = new KustoRequestProperties
+            {
+                Parameters = queryParameters.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal)
+            };
+        }
+
+        return ExecuteAsync(clusterUrl, "/v1/rest/mgmt", payload, cancellationToken);
     }
 
     public Task<TabularData> ExecuteQueryAsync(string clusterUrl, string database, string query, CancellationToken cancellationToken)
@@ -43,7 +63,7 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             _logger.LogError("Kusto request to {Uri} failed with status code {StatusCode}. Body: {Body}", requestUri, (int)response.StatusCode, body);
-            throw new UserFacingException($"Kusto request failed with status code {(int)response.StatusCode}.");
+            throw new UserFacingException(CreateUserFacingError(response.StatusCode, body));
         }
 
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -204,6 +224,63 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
             JsonValueKind.Undefined => null,
             _ => element.GetRawText()
         };
+    }
+
+    private static string CreateUserFacingError(HttpStatusCode statusCode, string responseBody)
+    {
+        var detail = ExtractActionableDetail(responseBody);
+
+        return statusCode switch
+        {
+            HttpStatusCode.BadRequest => string.IsNullOrWhiteSpace(detail)
+                ? "Kusto rejected the query or command. Check your syntax and verify the selected cluster and database."
+                : $"Kusto rejected the query or command: {detail}",
+            HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
+                "Kusto rejected this request because your identity does not have access. Run 'az login' and verify access to the cluster and database.",
+            _ => string.IsNullOrWhiteSpace(detail)
+                ? "Kusto request failed. Verify the cluster, database, and your access."
+                : $"Kusto request failed: {detail}"
+        };
+    }
+
+    private static string? ExtractActionableDetail(string responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody))
+        {
+            return null;
+        }
+
+        var lines = responseBody.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var line in lines)
+        {
+            var normalizedLine = line;
+            if (normalizedLine.StartsWith("Bad request:", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedLine = normalizedLine["Bad request:".Length..].Trim();
+            }
+            else if (normalizedLine.StartsWith("General_BadRequest:", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedLine = normalizedLine["General_BadRequest:".Length..].Trim();
+            }
+
+            if (string.IsNullOrWhiteSpace(normalizedLine))
+            {
+                continue;
+            }
+
+            if (normalizedLine.StartsWith("Error details:", StringComparison.OrdinalIgnoreCase) ||
+                normalizedLine.Contains("ClientRequestId=", StringComparison.OrdinalIgnoreCase) ||
+                normalizedLine.Contains("ActivityId=", StringComparison.OrdinalIgnoreCase) ||
+                normalizedLine.Contains("Timestamp=", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalizedLine, "Request is invalid and cannot be executed.", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return normalizedLine;
+        }
+
+        return null;
     }
 
     private sealed record ParsedKustoTable(

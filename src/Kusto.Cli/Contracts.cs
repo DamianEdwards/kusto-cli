@@ -21,7 +21,12 @@ public interface ITokenProvider
 
 public interface IKustoService
 {
-    Task<TabularData> ExecuteManagementCommandAsync(string clusterUrl, string? database, string command, CancellationToken cancellationToken);
+    Task<TabularData> ExecuteManagementCommandAsync(
+        string clusterUrl,
+        string? database,
+        string command,
+        IReadOnlyDictionary<string, string>? queryParameters,
+        CancellationToken cancellationToken);
     Task<TabularData> ExecuteQueryAsync(string clusterUrl, string database, string query, CancellationToken cancellationToken);
 }
 

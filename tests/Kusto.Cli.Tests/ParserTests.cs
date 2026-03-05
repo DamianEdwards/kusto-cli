@@ -29,4 +29,20 @@ public sealed class ParserTests
         var parsed = CliRunner.ParseLogLevelToken(value);
         Assert.NotNull(parsed);
     }
+
+    [Fact]
+    public void Parse_DatabaseList_AcceptsFilterAndTake()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["database", "list", "--filter", "^DD", "--take", "10"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_TableList_AcceptsFilterAndTake()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["table", "list", "--filter", "Events$", "--take", "25"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
 }

@@ -18,14 +18,8 @@ Initial implementation is in place and actively evolving.
 ## Build and test
 
 ```powershell
-dotnet build kusto.slnx
-dotnet test kusto.slnx
-```
-
-## Native AOT publish (standalone executable)
-
-```powershell
-.\scripts\publish-aot.ps1 -RuntimeIdentifier win-x64
+dotnet build
+dotnet test
 ```
 
 ## License

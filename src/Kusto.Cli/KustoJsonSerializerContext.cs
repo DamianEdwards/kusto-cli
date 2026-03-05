@@ -14,6 +14,7 @@ namespace Kusto.Cli;
 [JsonSerializable(typeof(KnownCluster))]
 [JsonSerializable(typeof(KustoConfig))]
 [JsonSerializable(typeof(KustoRequestPayload))]
+[JsonSerializable(typeof(KustoRequestProperties))]
 [JsonSerializable(typeof(KustoResponsePayload))]
 [JsonSerializable(typeof(KustoResponseTable))]
 [JsonSerializable(typeof(KustoResponseColumn))]

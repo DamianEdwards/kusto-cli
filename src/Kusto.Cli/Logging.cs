@@ -1,4 +1,7 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 
 namespace Kusto.Cli;
 
@@ -17,7 +20,19 @@ public static class LoggingFactoryBuilder
             builder.AddProvider(new FileLoggerProvider(resolvedLogFilePath, effectiveLevel));
             if (requestedLogLevel.HasValue)
             {
-                builder.AddProvider(new StderrLoggerProvider(effectiveLevel, resolvedStderr));
+                if (stderrWriter is null)
+                {
+                    builder.AddConsole(options =>
+                    {
+                        options.FormatterName = KustoConsoleFormatter.FormatterName;
+                        options.LogToStandardErrorThreshold = LogLevel.Trace;
+                    });
+                    builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<ConsoleFormatter, KustoConsoleFormatter>());
+                }
+                else
+                {
+                    builder.AddProvider(new StderrLoggerProvider(effectiveLevel, resolvedStderr, useAnsi: false));
+                }
             }
         });
     }
@@ -67,11 +82,12 @@ public sealed class FileLoggerProvider : ILoggerProvider
     }
 }
 
-public sealed class StderrLoggerProvider(LogLevel minimumLevel, TextWriter writer) : ILoggerProvider
+public sealed class StderrLoggerProvider(LogLevel minimumLevel, TextWriter writer, bool useAnsi) : ILoggerProvider
 {
     private readonly object _sync = new();
     private readonly LogLevel _minimumLevel = minimumLevel;
     private readonly TextWriter _writer = writer;
+    private readonly bool _useAnsi = useAnsi;
 
     public ILogger CreateLogger(string categoryName)
     {
@@ -86,7 +102,7 @@ public sealed class StderrLoggerProvider(LogLevel minimumLevel, TextWriter write
     {
         lock (_sync)
         {
-            _writer.WriteLine(line);
+            _writer.WriteLine(ConsoleStyle.ColorizeLog(line, _useAnsi));
             _writer.Flush();
         }
     }
