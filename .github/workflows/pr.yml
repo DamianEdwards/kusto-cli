@@ -54,4 +54,53 @@ jobs:
             ./test-results/*.trx
             ./test-results/*.html
           retention-days: 30
+  
+  publish-aot:
+    needs: [build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            rid: win-x64
+          - runner: ubuntu-22.04
+            rid: linux-x64
+          - runner: macos-latest
+            rid: osx-arm64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install linux-arm64 prerequisites
+        if: matrix.rid == 'linux-arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo dpkg --add-architecture arm64
+          sudo bash -c 'cat > /etc/apt/sources.list.d/arm64.list <<EOF
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy main restricted
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main restricted
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy-backports main restricted universe multiverse
+          EOF'
+          sudo sed -i -e 's/^deb /deb [arch=amd64] /g' /etc/apt/sources.list
+          sudo apt update
+          sudo apt install -y clang llvm binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu zlib1g-dev:arm64
+
+      - name: Run dotnet publish (windows)
+        if: matrix.rid == 'win-x64' || matrix.rid == 'win-arm64'
+        shell: pwsh
+        run: dotnet publish .\src\Kusto.Cli\ -r '${{ matrix.rid }}'
+      
+      - name: Run dotnet publish (non-windows)
+        if: matrix.rid != 'win-x64' && matrix.rid != 'win-arm64'
+        shell: bash
+        run: dotnet publish ./src/Kusto.Cli/ -r '${{ matrix.rid }}'
 
