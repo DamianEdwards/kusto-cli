@@ -155,20 +155,31 @@ try
         throw "Published binary '$binaryPath' was not found."
     }
 
+    New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
+    Copy-Item $binaryPath (Join-Path $stagingDirectory $binaryName) -Force
+    Copy-Item (Join-Path $repoRoot 'LICENSE') (Join-Path $stagingDirectory 'LICENSE') -Force
+
     $assetPath =
         if ($platform -eq 'win')
         {
-            $path = Join-Path $artifactsDirectory "kusto-$RuntimeIdentifier.exe"
-            Copy-Item $binaryPath $path -Force
+            $path = Join-Path $artifactsDirectory "kusto-$RuntimeIdentifier.zip"
+            if (Test-Path $path)
+            {
+                Remove-Item $path -Force
+            }
+
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($stagingDirectory, $path)
             $path
         }
         else
         {
-            New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
-            Copy-Item $binaryPath (Join-Path $stagingDirectory 'kusto') -Force
-            Copy-Item (Join-Path $repoRoot 'LICENSE') (Join-Path $stagingDirectory 'LICENSE') -Force
-
             $path = Join-Path $artifactsDirectory "kusto-$RuntimeIdentifier.tar.gz"
+            if (Test-Path $path)
+            {
+                Remove-Item $path -Force
+            }
+
             tar -czf $path -C $stagingDirectory .
             if ($LASTEXITCODE -ne 0)
             {
@@ -189,7 +200,7 @@ try
         platform = $platform
         architecture = $architecture
         assetName = $assetName
-        fileType = if ($platform -eq 'win') { 'exe' } else { 'tar.gz' }
+        fileType = if ($platform -eq 'win') { 'zip' } else { 'tar.gz' }
         commandName = 'kusto'
         sha256 = $hash
     }

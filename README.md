@@ -255,10 +255,11 @@ CI publishes native assets for:
 - `osx-x64`
 - `osx-arm64`
 
-Release assets are intentionally shaped for stable download URLs and future WinGet automation:
+Release assets are intentionally shaped for stable download URLs and easy platform-specific downloads:
 
-- Windows: raw executables such as `kusto-win-x64.exe`
-- Linux/macOS: archives such as `kusto-linux-x64.tar.gz` containing `kusto` plus `LICENSE`
+- Windows: zip archives such as `kusto-win-x64.zip`
+- Linux/macOS: tarballs such as `kusto-linux-x64.tar.gz`
+- Archive contents: `kusto.exe` on Windows, `kusto` on Linux/macOS, plus `LICENSE`
 - Bundles always include `checksums.txt` and `release-metadata.json`
 
 If you want to generate the same release-shaped outputs locally, use the helper scripts instead of calling `dotnet publish` directly:
