@@ -4,6 +4,10 @@ namespace Kusto.Cli.Tests;
 
 public sealed class SchemaCacheSettingsResolverTests
 {
+    private const string FakeLocalApplicationData = @"C:\Users\me\AppData\Local";
+    private const string FakeUserProfile = @"C:\Users\me";
+    private const string FakeXdgCacheHome = @"C:\xdg-cache";
+
     [Fact]
     public void Resolve_IsEnabledByDefault()
     {
@@ -11,11 +15,11 @@ public sealed class SchemaCacheSettingsResolverTests
             getEnvironmentVariable: _ => null,
             getFolderPath: folder => folder switch
             {
-                Environment.SpecialFolder.LocalApplicationData => @"C:\Users\me\AppData\Local",
-                Environment.SpecialFolder.UserProfile => @"C:\Users\me",
+                Environment.SpecialFolder.LocalApplicationData => FakeLocalApplicationData,
+                Environment.SpecialFolder.UserProfile => FakeUserProfile,
                 _ => string.Empty
             },
-            getUserHomeDirectory: () => @"C:\Users\me",
+            getUserHomeDirectory: () => FakeUserProfile,
             isOSPlatform: platform => platform == OSPlatform.Windows);
 
         var settings = resolver.Resolve(
@@ -24,7 +28,7 @@ public sealed class SchemaCacheSettingsResolverTests
             "Samples");
 
         Assert.True(settings.Enabled);
-        Assert.Equal(Path.GetFullPath(@"C:\Users\me\AppData\Local\kusto\schema-cache"), settings.CacheDirectory);
+        Assert.Equal(Path.GetFullPath(Path.Combine(FakeLocalApplicationData, "kusto", "schema-cache")), settings.CacheDirectory);
     }
 
     [Fact]
@@ -34,11 +38,11 @@ public sealed class SchemaCacheSettingsResolverTests
             getEnvironmentVariable: _ => null,
             getFolderPath: folder => folder switch
             {
-                Environment.SpecialFolder.LocalApplicationData => @"C:\Users\me\AppData\Local",
-                Environment.SpecialFolder.UserProfile => @"C:\Users\me",
+                Environment.SpecialFolder.LocalApplicationData => FakeLocalApplicationData,
+                Environment.SpecialFolder.UserProfile => FakeUserProfile,
                 _ => string.Empty
             },
-            getUserHomeDirectory: () => @"C:\Users\me",
+            getUserHomeDirectory: () => FakeUserProfile,
             isOSPlatform: platform => platform == OSPlatform.Windows);
 
         var settings = resolver.Resolve(
@@ -53,7 +57,7 @@ public sealed class SchemaCacheSettingsResolverTests
             "Samples");
 
         Assert.True(settings.Enabled);
-        Assert.Equal(Path.GetFullPath(@"C:\Users\me\AppData\Local\kusto\schema-cache"), settings.CacheDirectory);
+        Assert.Equal(Path.GetFullPath(Path.Combine(FakeLocalApplicationData, "kusto", "schema-cache")), settings.CacheDirectory);
         Assert.Equal(TimeSpan.FromSeconds(SchemaCacheSettingsResolver.DefaultTtlSeconds), settings.Ttl);
     }
 
@@ -61,9 +65,9 @@ public sealed class SchemaCacheSettingsResolverTests
     public void Resolve_UsesXdgCacheHomeOnLinux()
     {
         var resolver = new SchemaCacheSettingsResolver(
-            getEnvironmentVariable: name => name == "XDG_CACHE_HOME" ? @"C:\xdg-cache" : null,
+            getEnvironmentVariable: name => name == "XDG_CACHE_HOME" ? FakeXdgCacheHome : null,
             getFolderPath: _ => string.Empty,
-            getUserHomeDirectory: () => @"C:\Users\me",
+            getUserHomeDirectory: () => FakeUserProfile,
             isOSPlatform: _ => false);
 
         var settings = resolver.Resolve(
@@ -77,7 +81,7 @@ public sealed class SchemaCacheSettingsResolverTests
             "https://help.kusto.windows.net",
             "Samples");
 
-        Assert.Equal(Path.GetFullPath(@"C:\xdg-cache\kusto\schema-cache"), settings.CacheDirectory);
+        Assert.Equal(Path.GetFullPath(Path.Combine(FakeXdgCacheHome, "kusto", "schema-cache")), settings.CacheDirectory);
     }
 
     [Fact]
@@ -86,7 +90,7 @@ public sealed class SchemaCacheSettingsResolverTests
         var resolver = new SchemaCacheSettingsResolver(
             getEnvironmentVariable: _ => null,
             getFolderPath: _ => string.Empty,
-            getUserHomeDirectory: () => @"C:\Users\me",
+            getUserHomeDirectory: () => FakeUserProfile,
             isOSPlatform: _ => false);
 
         var settings = resolver.Resolve(
@@ -125,7 +129,7 @@ public sealed class SchemaCacheSettingsResolverTests
         var resolver = new SchemaCacheSettingsResolver(
             getEnvironmentVariable: name => environmentValues.TryGetValue(name, out var value) ? value : null,
             getFolderPath: _ => string.Empty,
-            getUserHomeDirectory: () => @"C:\Users\me",
+            getUserHomeDirectory: () => FakeUserProfile,
             isOSPlatform: platform => platform == OSPlatform.Windows);
 
         var settings = resolver.Resolve(
@@ -158,7 +162,7 @@ public sealed class SchemaCacheSettingsResolverTests
         var resolver = new SchemaCacheSettingsResolver(
             getEnvironmentVariable: name => environmentValues.TryGetValue(name, out var value) ? value : null,
             getFolderPath: _ => string.Empty,
-            getUserHomeDirectory: () => @"C:\Users\me",
+            getUserHomeDirectory: () => FakeUserProfile,
             isOSPlatform: platform => platform == OSPlatform.Windows);
 
         var settings = resolver.Resolve(
