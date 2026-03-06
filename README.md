@@ -14,6 +14,7 @@ A native command-line tool for Azure Data Explorer (Kusto), focused on quick exp
 - Basic public, US Government, and China cloud support for token audience selection and Web Explorer links
 - Multiple output formats (`human`, `json`, `markdown`/`md`)
 - Configurable log verbosity with structured console/file logging
+- GitHub Actions workflows for PR validation, versioned native release assets, and release promotion
 
 ## Authentication
 
@@ -223,6 +224,59 @@ kusto query "StormEvents | take 1" --cluster help --database Samples --log-level
 dotnet build kusto.slnx
 dotnet test kusto.slnx
 ```
+
+## CI and release workflow
+
+The repository includes four GitHub Actions workflows:
+
+- `pr.yml` - restore/build/test validation for pull requests across Ubuntu, Windows, and macOS
+- `ci.yml` - version calculation, build/test validation, native asset publishing, and dev draft release updates on `main`
+- `release.yml` - manual promotion of the prebuilt RC bundle into a GitHub release without rebuilding
+- `bump-version.yml` - manual semantic-version / phase transitions for `pre`, `rc`, and `rtm`
+
+Version state is stored in the body of the draft `dev` release so CI can calculate the next development and release-candidate versions without committing version files into the repo.
+
+### Typical maintainer flow
+
+1. Open a pull request and let `pr.yml` validate restore/build/test behavior.
+2. Merge to `main`, which lets `ci.yml` calculate versions, publish native assets, and refresh the draft `dev` release.
+3. When you want to move between `pre`, `rc`, or `rtm`, run `bump-version.yml`.
+4. When the RC bundle is the one you want to ship, run `release.yml` to promote those already-built artifacts into the GitHub release.
+5. The next push to `main` refreshes the draft `dev` release for ongoing development.
+
+## Native release asset layout
+
+CI publishes native assets for:
+
+- `win-x64`
+- `win-arm64`
+- `linux-x64`
+- `linux-arm64`
+- `osx-x64`
+- `osx-arm64`
+
+Release assets are intentionally shaped for stable download URLs and future WinGet automation:
+
+- Windows: raw executables such as `kusto-win-x64.exe`
+- Linux/macOS: archives such as `kusto-linux-x64.tar.gz` containing `kusto` plus `LICENSE`
+- Bundles always include `checksums.txt` and `release-metadata.json`
+
+If you want to generate the same release-shaped outputs locally, use the helper scripts instead of calling `dotnet publish` directly:
+
+```powershell
+pwsh .\scripts\Publish-NativeAsset.ps1 -RuntimeIdentifier win-x64 -Version 0.1.0 -ArtifactsDirectory .\artifacts\local-release
+pwsh .\scripts\Merge-ReleaseBundle.ps1 -InputDirectory .\artifacts\local-release -OutputDirectory .\artifacts\local-bundle -Version 0.1.0
+```
+
+## NativeAOT prerequisites
+
+NativeAOT publishing needs platform-specific native toolchains in addition to the .NET SDK:
+
+- Windows: Visual Studio C++ tools / Desktop development with C++ (ARM64 publishing also needs ARM64 C++ tools)
+- Linux ARM64 cross-publish on Ubuntu: `clang`, `llvm`, `binutils-aarch64-linux-gnu`, `gcc-aarch64-linux-gnu`, and `zlib1g-dev:arm64`
+- macOS: Xcode command line tools
+
+The GitHub workflows install or configure the required toolchains for CI. When publishing locally, make sure the NativeAOT prerequisites for your target runtime are available first.
 
 ## Run from source
 

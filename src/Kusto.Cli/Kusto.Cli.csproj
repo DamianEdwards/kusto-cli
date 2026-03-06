@@ -13,6 +13,9 @@
     <Product>Kusto CLI</Product>
     <Copyright>Copyright © 2026 Damian Edwards</Copyright>
     <Authors>Damian Edwards</Authors>
+    <Description>A native command-line tool for Azure Data Explorer (Kusto).</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/DamianEdwards/kusto-cli</PackageProjectUrl>
   </PropertyGroup>
 
   <ItemGroup>
