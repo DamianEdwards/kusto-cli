@@ -188,14 +188,30 @@ dotnet test kusto.slnx
 ## Run from source
 
 ```powershell
-dotnet run --project .\src\Kusto.Cli\ -- --query "StormEvents | take 5" --cluster help --database Samples
+.\kusto --query "StormEvents | take 5" --cluster help --database Samples
 ```
 
-## Publish
+## Publish the native executable locally
+
+Windows:
 
 ```powershell
-dotnet publish .\src\Kusto.Cli\ -c Release -r win-x64
+dotnet publish .\src\Kusto.Cli\ --os win [--arch <arch>]
 ```
+
+macOS:
+
+```bash
+dotnet publish ./src/Kusto.Cli/ --os osx [--arch <arch>]
+```
+
+Linux:
+
+```bash
+dotnet publish ./src/Kusto.Cli/ --os linux [--arch <arch>]
+```
+
+`<arch>` can be `x64` or `arm64`. If omitted, the current machine's architecture is used.
 
 ## License
 
