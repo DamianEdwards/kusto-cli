@@ -257,7 +257,8 @@ CI publishes native assets for:
 
 Release assets are intentionally shaped for stable download URLs and easy platform-specific downloads:
 
-- All platforms: archives such as `kusto-win-x64.zip` and `kusto-linux-x64.zip`
+- Windows: zip archives such as `kusto-win-x64.zip`
+- Linux/macOS: tarballs such as `kusto-linux-x64.tar.gz`
 - Archive contents: `kusto.exe` on Windows, `kusto` on Linux/macOS, plus `LICENSE`
 - Bundles always include `checksums.txt` and `release-metadata.json`
 

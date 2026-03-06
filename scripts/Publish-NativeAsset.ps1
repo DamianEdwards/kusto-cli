@@ -159,14 +159,35 @@ try
     Copy-Item $binaryPath (Join-Path $stagingDirectory $binaryName) -Force
     Copy-Item (Join-Path $repoRoot 'LICENSE') (Join-Path $stagingDirectory 'LICENSE') -Force
 
-    $assetPath = Join-Path $artifactsDirectory "kusto-$RuntimeIdentifier.zip"
-    if (Test-Path $assetPath)
-    {
-        Remove-Item $assetPath -Force
-    }
+    $assetPath =
+        if ($platform -eq 'win')
+        {
+            $path = Join-Path $artifactsDirectory "kusto-$RuntimeIdentifier.zip"
+            if (Test-Path $path)
+            {
+                Remove-Item $path -Force
+            }
 
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [System.IO.Compression.ZipFile]::CreateFromDirectory($stagingDirectory, $assetPath)
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($stagingDirectory, $path)
+            $path
+        }
+        else
+        {
+            $path = Join-Path $artifactsDirectory "kusto-$RuntimeIdentifier.tar.gz"
+            if (Test-Path $path)
+            {
+                Remove-Item $path -Force
+            }
+
+            tar -czf $path -C $stagingDirectory .
+            if ($LASTEXITCODE -ne 0)
+            {
+                throw "Failed to create archive '$path'."
+            }
+
+            $path
+        }
 
     $hash = (Get-FileHash $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $assetName = [System.IO.Path]::GetFileName($assetPath)
@@ -179,7 +200,7 @@ try
         platform = $platform
         architecture = $architecture
         assetName = $assetName
-        fileType = 'zip'
+        fileType = if ($platform -eq 'win') { 'zip' } else { 'tar.gz' }
         commandName = 'kusto'
         sha256 = $hash
     }
