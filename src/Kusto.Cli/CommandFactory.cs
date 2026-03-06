@@ -20,13 +20,15 @@ public static class CommandFactory
             Recursive = true
         };
 
-        var root = new RootCommand("A native command-line tool for Azure Data Explorer (Kusto).");
-        root.Add(formatOption);
-        root.Add(logLevelOption);
-        root.Add(BuildClusterCommand(formatOption, logLevelOption));
-        root.Add(BuildDatabaseCommand(formatOption, logLevelOption));
-        root.Add(BuildTableCommand(formatOption, logLevelOption));
-        root.Add(BuildQueryCommand(formatOption, logLevelOption));
+        var root = new RootCommand("A native command-line tool for Azure Data Explorer (Kusto).")
+        {
+            formatOption,
+            logLevelOption,
+            BuildClusterCommand(formatOption, logLevelOption),
+            BuildDatabaseCommand(formatOption, logLevelOption),
+            BuildTableCommand(formatOption, logLevelOption),
+            BuildQueryCommand(formatOption, logLevelOption)
+        };
         return root;
     }
 
@@ -75,8 +77,10 @@ public static class CommandFactory
             Description = "Cluster name or URL."
         };
 
-        var showCommand = new Command("show", "Show a known cluster.");
-        showCommand.Add(clusterReferenceArgument);
+        var showCommand = new Command("show", "Show a known cluster.")
+        {
+            clusterReferenceArgument
+        };
         showCommand.SetAction((parseResult, cancellationToken) =>
         {
             var format = parseResult.GetRequiredValue(formatOption);
@@ -145,8 +149,10 @@ public static class CommandFactory
             }, cancellationToken);
         });
 
-        var removeCommand = new Command("remove", "Remove a known cluster.");
-        removeCommand.Add(clusterReferenceArgument);
+        var removeCommand = new Command("remove", "Remove a known cluster.")
+        {
+            clusterReferenceArgument
+        };
         removeCommand.SetAction((parseResult, cancellationToken) =>
         {
             var format = parseResult.GetRequiredValue(formatOption);
@@ -172,8 +178,10 @@ public static class CommandFactory
             }, cancellationToken);
         });
 
-        var setDefaultCommand = new Command("set-default", "Set the default cluster.");
-        setDefaultCommand.Add(clusterReferenceArgument);
+        var setDefaultCommand = new Command("set-default", "Set the default cluster.")
+        {
+            clusterReferenceArgument
+        };
         setDefaultCommand.SetAction((parseResult, cancellationToken) =>
         {
             var format = parseResult.GetRequiredValue(formatOption);
@@ -217,10 +225,12 @@ public static class CommandFactory
 
         var databaseCommand = new Command("database", "Manage databases and defaults.");
 
-        var listCommand = new Command("list", "List databases.");
-        listCommand.Add(clusterOption);
-        listCommand.Add(filterOption);
-        listCommand.Add(takeOption);
+        var listCommand = new Command("list", "List databases.")
+        {
+            clusterOption,
+            filterOption,
+            takeOption
+        };
         listCommand.SetAction((parseResult, cancellationToken) =>
         {
             var clusterReference = parseResult.GetValue(clusterOption);
@@ -263,9 +273,11 @@ public static class CommandFactory
             Description = "Database name."
         };
 
-        var showCommand = new Command("show", "Show a database.");
-        showCommand.Add(databaseArgument);
-        showCommand.Add(clusterOption);
+        var showCommand = new Command("show", "Show a database.")
+        {
+            databaseArgument,
+            clusterOption
+        };
         showCommand.SetAction((parseResult, cancellationToken) =>
         {
             var databaseName = parseResult.GetRequiredValue(databaseArgument);
@@ -292,9 +304,11 @@ public static class CommandFactory
             }, cancellationToken);
         });
 
-        var setDefaultCommand = new Command("set-default", "Set default database for a cluster.");
-        setDefaultCommand.Add(databaseArgument);
-        setDefaultCommand.Add(clusterOption);
+        var setDefaultCommand = new Command("set-default", "Set default database for a cluster.")
+        {
+            databaseArgument,
+            clusterOption
+        };
         setDefaultCommand.SetAction((parseResult, cancellationToken) =>
         {
             var databaseName = parseResult.GetRequiredValue(databaseArgument);
@@ -351,11 +365,13 @@ public static class CommandFactory
 
         var tableCommand = new Command("table", "Browse tables and schemas.");
 
-        var listCommand = new Command("list", "List tables in a database.");
-        listCommand.Add(clusterOption);
-        listCommand.Add(databaseOption);
-        listCommand.Add(filterOption);
-        listCommand.Add(takeOption);
+        var listCommand = new Command("list", "List tables in a database.")
+        {
+            clusterOption,
+            databaseOption,
+            filterOption,
+            takeOption
+        };
         listCommand.SetAction((parseResult, cancellationToken) =>
         {
             var clusterReference = parseResult.GetValue(clusterOption);
@@ -392,10 +408,12 @@ public static class CommandFactory
             Description = "Table name."
         };
 
-        var showCommand = new Command("show", "Show table schema.");
-        showCommand.Add(tableArgument);
-        showCommand.Add(clusterOption);
-        showCommand.Add(databaseOption);
+        var showCommand = new Command("show", "Show table schema.")
+        {
+            tableArgument,
+            clusterOption,
+            databaseOption
+        };
         showCommand.SetAction((parseResult, cancellationToken) =>
         {
             var tableName = parseResult.GetRequiredValue(tableArgument);

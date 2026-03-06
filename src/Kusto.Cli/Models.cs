@@ -45,7 +45,7 @@ public sealed class KustoConfig
 {
     public List<KnownCluster> Clusters { get; set; } = [];
     public string? DefaultClusterUrl { get; set; }
-    public Dictionary<string, string> DefaultDatabases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> DefaultDatabases { get; set; } = [with(StringComparer.OrdinalIgnoreCase)];
 }
 
 public sealed class KnownCluster
