@@ -45,4 +45,12 @@ public sealed class ParserTests
         var result = rootCommand.Parse(["table", "list", "--filter", "Events$", "--take", "25"], new ParserConfiguration());
         Assert.Empty(result.Errors);
     }
+
+    [Fact]
+    public void Parse_Query_AcceptsShowStats()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["query", "print 1", "--show-stats"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
 }

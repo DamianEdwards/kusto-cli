@@ -477,17 +477,23 @@ public static class CommandFactory
         {
             Description = "Database name to use."
         };
+        var showStatsOption = new Option<bool>("--show-stats")
+        {
+            Description = "Include query execution statistics when Kusto returns them."
+        };
 
         queryCommand.Add(queryArgument);
         queryCommand.Add(queryFileOption);
         queryCommand.Add(clusterOption);
         queryCommand.Add(databaseOption);
+        queryCommand.Add(showStatsOption);
         queryCommand.SetAction((parseResult, cancellationToken) =>
         {
             var queryText = parseResult.GetValue(queryArgument);
             var queryFile = parseResult.GetValue(queryFileOption);
             var clusterReference = parseResult.GetValue(clusterOption);
             var databaseName = parseResult.GetValue(databaseOption);
+            var showStats = parseResult.GetValue(showStatsOption);
             var format = parseResult.GetRequiredValue(formatOption);
             var logLevel = parseResult.GetValue(logLevelOption);
 
@@ -507,9 +513,15 @@ public static class CommandFactory
                     resolvedCluster.Url,
                     resolvedDatabase,
                     query,
+                    showStats,
                     ct);
 
-                return new CliOutput { Table = result };
+                return new CliOutput
+                {
+                    Table = result.Table,
+                    Statistics = result.Statistics,
+                    IsQueryResultTable = true
+                };
             }, cancellationToken);
         });
 

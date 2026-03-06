@@ -37,26 +37,32 @@ public sealed class OutputFormatter : IOutputFormatter
             wroteSection = true;
         }
 
-        if (output.Properties is { Count: > 0 })
+        var displayProperties = BuildDisplayProperties(output);
+        if (displayProperties.Count > 0)
         {
             if (wroteSection)
             {
                 console.WriteLine();
             }
 
-            var propertiesTable = new Table().Border(TableBorder.Rounded).Expand();
-            propertiesTable.AddColumn(new TableColumn("Property"));
-            propertiesTable.AddColumn(new TableColumn("Value"));
-
-            foreach (var pair in output.Properties.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
-            {
-                propertiesTable.AddRow(
-                    Markup.Escape(pair.Key),
-                    Markup.Escape(pair.Value ?? string.Empty));
-            }
-
-            console.Write(propertiesTable);
+            console.Write(CreatePropertiesTable(displayProperties));
             wroteSection = true;
+        }
+
+        if (output.Statistics is not null)
+        {
+            var statisticsProperties = FlattenStatistics(output.Statistics);
+            if (statisticsProperties.Count > 0)
+            {
+                if (wroteSection)
+                {
+                    console.WriteLine();
+                }
+
+                console.MarkupLine("Statistics");
+                console.Write(CreatePropertiesTable(statisticsProperties));
+                wroteSection = true;
+            }
         }
 
         if (output.Table is not null)
@@ -84,15 +90,23 @@ public sealed class OutputFormatter : IOutputFormatter
             buffer.AppendLine();
         }
 
-        if (output.Properties is not null && output.Properties.Count > 0)
+        var displayProperties = BuildDisplayProperties(output);
+        if (displayProperties.Count > 0)
         {
-            buffer.AppendLine("| Property | Value |");
-            buffer.AppendLine("|---|---|");
-            foreach (var pair in output.Properties.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
-            {
-                buffer.AppendLine($"| {EscapeMarkdown(pair.Key)} | {EscapeMarkdown(pair.Value ?? string.Empty)} |");
-            }
+            AppendPropertiesTable(buffer, displayProperties);
             buffer.AppendLine();
+        }
+
+        if (output.Statistics is not null)
+        {
+            var statisticsProperties = FlattenStatistics(output.Statistics);
+            if (statisticsProperties.Count > 0)
+            {
+                buffer.AppendLine("### Statistics");
+                buffer.AppendLine();
+                AppendPropertiesTable(buffer, statisticsProperties);
+                buffer.AppendLine();
+            }
         }
 
         if (output.Table is not null)
@@ -110,6 +124,116 @@ public sealed class OutputFormatter : IOutputFormatter
         }
 
         return buffer.ToString().TrimEnd();
+    }
+
+    private static Table CreatePropertiesTable(IReadOnlyDictionary<string, string?> properties)
+    {
+        var propertiesTable = new Table().Border(TableBorder.Rounded).Expand();
+        propertiesTable.AddColumn(new TableColumn("Property"));
+        propertiesTable.AddColumn(new TableColumn("Value"));
+
+        foreach (var pair in properties.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            propertiesTable.AddRow(
+                Markup.Escape(pair.Key),
+                Markup.Escape(pair.Value ?? string.Empty));
+        }
+
+        return propertiesTable;
+    }
+
+    private static Dictionary<string, string?> BuildDisplayProperties(CliOutput output)
+    {
+        return output.Properties is null
+            ? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string?>(output.Properties, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<string, string?> FlattenStatistics(QueryStatistics statistics)
+    {
+        var properties = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+        AddStatistic(properties, "ExecutionTimeSec", FormatNumber(statistics.ExecutionTimeSec));
+
+        if (statistics.Cpu is not null)
+        {
+            AddStatistic(properties, "Cpu.Total", statistics.Cpu.Total);
+            AddStatistic(properties, "Cpu.QueryExecution", statistics.Cpu.QueryExecution);
+            AddStatistic(properties, "Cpu.QueryPlanning", statistics.Cpu.QueryPlanning);
+        }
+
+        AddStatistic(properties, "MemoryPeakPerNodeMb", FormatNumber(statistics.MemoryPeakPerNodeMb));
+
+        if (statistics.Cache is not null)
+        {
+            AddStatistic(properties, "Cache.HotHitMb", FormatNumber(statistics.Cache.HotHitMb));
+            AddStatistic(properties, "Cache.HotMissMb", FormatNumber(statistics.Cache.HotMissMb));
+        }
+
+        if (statistics.Network is not null)
+        {
+            AddStatistic(properties, "Network.CrossClusterMb", FormatNumber(statistics.Network.CrossClusterMb));
+            AddStatistic(properties, "Network.InterClusterMb", FormatNumber(statistics.Network.InterClusterMb));
+        }
+
+        if (statistics.Extents is not null)
+        {
+            AddStatistic(properties, "Extents.Scanned", FormatNumber(statistics.Extents.Scanned));
+            AddStatistic(properties, "Extents.Total", FormatNumber(statistics.Extents.Total));
+        }
+
+        if (statistics.Rows is not null)
+        {
+            AddStatistic(properties, "Rows.Scanned", FormatNumber(statistics.Rows.Scanned));
+            AddStatistic(properties, "Rows.Total", FormatNumber(statistics.Rows.Total));
+        }
+
+        if (statistics.Result is not null)
+        {
+            AddStatistic(properties, "Result.RowCount", FormatNumber(statistics.Result.RowCount));
+            AddStatistic(properties, "Result.SizeKb", FormatNumber(statistics.Result.SizeKb));
+        }
+
+        if (statistics.CrossClusterBreakdown is not null)
+        {
+            foreach (var cluster in statistics.CrossClusterBreakdown.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                AddStatistic(properties, $"CrossClusterBreakdown.{cluster.Key}.CpuTotal", cluster.Value.CpuTotal);
+                AddStatistic(properties, $"CrossClusterBreakdown.{cluster.Key}.MemoryPeakMb", FormatNumber(cluster.Value.MemoryPeakMb));
+                AddStatistic(properties, $"CrossClusterBreakdown.{cluster.Key}.CacheHitMb", FormatNumber(cluster.Value.CacheHitMb));
+                AddStatistic(properties, $"CrossClusterBreakdown.{cluster.Key}.CacheMissMb", FormatNumber(cluster.Value.CacheMissMb));
+            }
+        }
+
+        return properties;
+    }
+
+    private static void AppendPropertiesTable(StringBuilder buffer, IReadOnlyDictionary<string, string?> properties)
+    {
+        buffer.AppendLine("| Property | Value |");
+        buffer.AppendLine("|---|---|");
+        foreach (var pair in properties.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            buffer.AppendLine($"| {EscapeMarkdown(pair.Key)} | {EscapeMarkdown(pair.Value ?? string.Empty)} |");
+        }
+    }
+
+    private static void AddStatistic(IDictionary<string, string?> properties, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            properties[key] = value;
+        }
+    }
+
+    private static string? FormatNumber(double? value)
+    {
+        return value?.ToString("0.##", CultureInfo.InvariantCulture);
+    }
+
+    private static string? FormatNumber(int? value)
+    {
+        return value?.ToString(CultureInfo.InvariantCulture);
     }
 
     private static string EscapeMarkdown(string value)

@@ -8,6 +8,7 @@ A native command-line tool for Azure Data Explorer (Kusto), focused on quick exp
 - Manage databases and defaults (`database` command group)
 - Browse tables and schemas (`table` command group)
 - Run KQL from inline text, files, or stdin (`query`)
+- Show optional query execution statistics with `--show-stats`
 - Multiple output formats (`human`, `json`, `markdown`/`md`)
 - Configurable log verbosity with structured console/file logging
 
@@ -71,7 +72,7 @@ These options are available on all commands:
 | `database set-default <database>` | Set default database for a cluster. | `database` | `--cluster`, global options |
 | `table list` | List tables in a database. | none | `--cluster`, `--database`, `--filter`, `--take`, global options |
 | `table show <table>` | Show schema/details for one table. | `table` | `--cluster`, `--database`, global options |
-| `query [<query>]` | Run KQL from inline text, file, or stdin. | optional `query` | `--file`, `--cluster`, `--database`, global options |
+| `query [<query>]` | Run KQL from inline text, file, or stdin. | optional `query` | `--file`, `--cluster`, `--database`, `--show-stats`, global options |
 
 ## Command-specific option details
 
@@ -82,6 +83,7 @@ These options are available on all commands:
 | `--filter <value>` | `database list`, `table list` | Name filter. Supports contains/startswith/endswith semantics using anchors (see below). |
 | `--take <int>` | `database list`, `table list` | Limits number of rows returned. Must be a positive integer. |
 | `--file <path>` | `query` | Read query text from file. Cannot be combined with inline query argument. |
+| `--show-stats` | `query` | Include query execution statistics when Kusto returns them. |
 
 ### `--filter` semantics
 
@@ -154,6 +156,9 @@ StormEvents
 | where StartTime > ago(7d)
 | take 20
 "@ | kusto query - --cluster help --database Samples
+
+# Query with execution statistics when available
+kusto query "StormEvents | summarize Count=count() by State" --cluster help --database Samples --show-stats
 ```
 
 ## Output formats

@@ -30,7 +30,7 @@ public sealed class KustoHttpServiceTests
                     { "ColumnName": "DatabaseName", "DataType": "string" }
                   ],
                   "Rows": [
-                    [ "ddtelinsights" ]
+                    [ "Samples" ]
                   ]
                 }
               ]
@@ -45,7 +45,7 @@ public sealed class KustoHttpServiceTests
         var service = new KustoHttpService(httpClient, new StaticTokenProvider("fake-token"), NullLogger<KustoHttpService>.Instance);
 
         var result = await service.ExecuteManagementCommandAsync(
-            "https://ddtelinsights.kusto.windows.net",
+            "https://help.kusto.windows.net",
             null,
             ".show databases | project DatabaseName",
             null,
@@ -53,7 +53,7 @@ public sealed class KustoHttpServiceTests
 
         Assert.Equal(["DatabaseName"], result.Columns);
         Assert.Single(result.Rows);
-        Assert.Equal("ddtelinsights", result.Rows[0][0]);
+        Assert.Equal("Samples", result.Rows[0][0]);
         Assert.Equal("Bearer", handler.LastAuthorizationScheme);
         Assert.Equal("fake-token", handler.LastAuthorizationParameter);
     }
@@ -88,14 +88,216 @@ public sealed class KustoHttpServiceTests
         var service = new KustoHttpService(httpClient, new StaticTokenProvider("fake-token"), NullLogger<KustoHttpService>.Instance);
 
         var result = await service.ExecuteQueryAsync(
-            "https://ddtelinsights.kusto.windows.net",
-            "DDTelInsights",
+            "https://help.kusto.windows.net",
+            "Samples",
             "print ValidationInline=1",
+            includeStatistics: false,
             CancellationToken.None);
 
-        Assert.Equal(["ValidationInline"], result.Columns);
-        Assert.Single(result.Rows);
-        Assert.Equal("1", result.Rows[0][0]);
+        Assert.Equal(["ValidationInline"], result.Table.Columns);
+        Assert.Single(result.Table.Rows);
+        Assert.Equal("1", result.Table.Rows[0][0]);
+        Assert.Null(result.Statistics);
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_WithShowStats_ExtractsStatisticsFromStatusDescription()
+    {
+        var statsPayload = JsonSerializer.Serialize(
+            new Dictionary<string, object?>
+            {
+                ["ExecutionTime"] = 1.234,
+                ["resource_usage"] = new Dictionary<string, object?>
+                {
+                    ["cpu"] = new Dictionary<string, object?>
+                    {
+                        ["total cpu"] = "00:00:01.5",
+                        ["breakdown"] = new Dictionary<string, object?>
+                        {
+                            ["query execution"] = "00:00:01.2",
+                            ["query planning"] = "00:00:00.3"
+                        }
+                    },
+                    ["memory"] = new Dictionary<string, object?>
+                    {
+                        ["peak_per_node"] = 47395635
+                    },
+                    ["cache"] = new Dictionary<string, object?>
+                    {
+                        ["shards"] = new Dictionary<string, object?>
+                        {
+                            ["hot"] = new Dictionary<string, object?>
+                            {
+                                ["hitbytes"] = 126353408,
+                                ["missbytes"] = 3355443
+                            }
+                        }
+                    },
+                    ["network"] = new Dictionary<string, object?>
+                    {
+                        ["cross_cluster_total_bytes"] = 5452595,
+                        ["inter_cluster_total_bytes"] = 0
+                    }
+                },
+                ["input_dataset_statistics"] = new Dictionary<string, object?>
+                {
+                    ["extents"] = new Dictionary<string, object?>
+                    {
+                        ["scanned"] = 42,
+                        ["total"] = 1000
+                    },
+                    ["rows"] = new Dictionary<string, object?>
+                    {
+                        ["scanned"] = 50000,
+                        ["total"] = 1000000
+                    }
+                },
+                ["dataset_statistics"] = new object?[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["table_row_count"] = 150,
+                        ["table_size"] = 12800
+                    }
+                },
+                ["cross_cluster_resource_usage"] = new Dictionary<string, object?>
+                {
+                    ["https://clustername.region.kusto.windows.net/"] = new Dictionary<string, object?>
+                    {
+                        ["cpu"] = new Dictionary<string, object?>
+                        {
+                            ["total cpu"] = "00:00:00.8"
+                        },
+                        ["memory"] = new Dictionary<string, object?>
+                        {
+                            ["peak_per_node"] = 23173530
+                        },
+                        ["cache"] = new Dictionary<string, object?>
+                        {
+                            ["shards"] = new Dictionary<string, object?>
+                            {
+                                ["hot"] = new Dictionary<string, object?>
+                                {
+                                    ["hitbytes"] = 52428800,
+                                    ["missbytes"] = 1048576
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+        var responseJson = JsonSerializer.Serialize(
+            new object[]
+            {
+                new
+                {
+                    FrameType = "DataTable",
+                    TableName = "PrimaryResult",
+                    TableKind = "PrimaryResult",
+                    Columns = new object[]
+                    {
+                        new { ColumnName = "ValidationInline", ColumnType = "long" }
+                    },
+                    Rows = new object?[][]
+                    {
+                        [1]
+                    }
+                },
+                new
+                {
+                    FrameType = "DataTable",
+                    TableName = "QueryCompletionInformation",
+                    TableKind = "QueryCompletionInformation",
+                    Columns = new object[]
+                    {
+                        new { ColumnName = "SeverityName", ColumnType = "string" },
+                        new { ColumnName = "StatusDescription", ColumnType = "string" }
+                    },
+                    Rows = new object?[][]
+                    {
+                        ["Stats", statsPayload]
+                    }
+                }
+            });
+
+        var handler = new RecordingHandler(() => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson)
+        });
+        using var httpClient = new HttpClient(handler);
+        var service = new KustoHttpService(httpClient, new StaticTokenProvider("fake-token"), NullLogger<KustoHttpService>.Instance);
+
+        var result = await service.ExecuteQueryAsync(
+            "https://help.kusto.windows.net",
+            "Samples",
+            "print ValidationInline=1",
+            includeStatistics: true,
+            CancellationToken.None);
+
+        Assert.NotNull(result.Statistics);
+        Assert.Equal(1.234, result.Statistics.ExecutionTimeSec);
+        Assert.Equal(45.2, result.Statistics.MemoryPeakPerNodeMb);
+        Assert.Equal(5.2, result.Statistics.Network?.CrossClusterMb);
+        Assert.Equal(42, result.Statistics.Extents?.Scanned);
+        Assert.Equal(150, result.Statistics.Result?.RowCount);
+        Assert.Equal("00:00:00.8", result.Statistics.CrossClusterBreakdown?["clustername.region.kusto.windows.net"].CpuTotal);
+        Assert.Equal(22.1, result.Statistics.CrossClusterBreakdown?["clustername.region.kusto.windows.net"].MemoryPeakMb);
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_WithShowStats_ExtractsStatisticsFromPayload()
+    {
+        var responseJson = JsonSerializer.Serialize(
+            new object[]
+            {
+                new
+                {
+                    FrameType = "DataTable",
+                    TableName = "PrimaryResult",
+                    TableKind = "PrimaryResult",
+                    Columns = new object[]
+                    {
+                        new { ColumnName = "ValidationInline", ColumnType = "long" }
+                    },
+                    Rows = new object?[][]
+                    {
+                        [1]
+                    }
+                },
+                new
+                {
+                    FrameType = "DataTable",
+                    TableName = "QueryCompletionInformation",
+                    TableKind = "QueryCompletionInformation",
+                    Columns = new object[]
+                    {
+                        new { ColumnName = "EventTypeName", ColumnType = "string" },
+                        new { ColumnName = "Payload", ColumnType = "string" }
+                    },
+                    Rows = new object?[][]
+                    {
+                        ["QueryResourceConsumption", "{\"ExecutionTime\":2.5}"]
+                    }
+                }
+            });
+
+        var handler = new RecordingHandler(() => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson)
+        });
+        using var httpClient = new HttpClient(handler);
+        var service = new KustoHttpService(httpClient, new StaticTokenProvider("fake-token"), NullLogger<KustoHttpService>.Instance);
+
+        var result = await service.ExecuteQueryAsync(
+            "https://help.kusto.windows.net",
+            "Samples",
+            "print ValidationInline=1",
+            includeStatistics: true,
+            CancellationToken.None);
+
+        Assert.NotNull(result.Statistics);
+        Assert.Equal(2.5, result.Statistics.ExecutionTimeSec);
     }
 
     [Fact]
@@ -111,9 +313,10 @@ public sealed class KustoHttpServiceTests
 
         var exception = await Assert.ThrowsAsync<UserFacingException>(() =>
             service.ExecuteQueryAsync(
-                "https://ddtelinsights.kusto.windows.net",
-                "DDTelInsights",
+                "https://help.kusto.windows.net",
+                "Samples",
                 "invalid query;",
+                includeStatistics: false,
                 CancellationToken.None));
 
         Assert.Contains("Kusto rejected the query or command", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -140,8 +343,8 @@ public sealed class KustoHttpServiceTests
 
         var exception = await Assert.ThrowsAsync<UserFacingException>(() =>
             service.ExecuteManagementCommandAsync(
-                "https://ddtelinsights.kusto.windows.net",
-                "DDTelInsights",
+                "https://help.kusto.windows.net",
+                "Samples",
                 ".show tables",
                 null,
                 CancellationToken.None));
@@ -163,7 +366,7 @@ public sealed class KustoHttpServiceTests
                   "TableName": "PrimaryResult",
                   "TableKind": "PrimaryResult",
                   "Columns": [{ "ColumnName": "DatabaseName", "DataType": "string" }],
-                  "Rows": [["DDTelInsights"]]
+                  "Rows": [["Samples"]]
                 }
               ]
             }
@@ -176,16 +379,16 @@ public sealed class KustoHttpServiceTests
         var service = new KustoHttpService(httpClient, new StaticTokenProvider("fake-token"), NullLogger<KustoHttpService>.Instance);
 
         _ = await service.ExecuteManagementCommandAsync(
-            "https://ddtelinsights.kusto.windows.net",
+            "https://help.kusto.windows.net",
             null,
             "declare query_parameters(filterValue:string); .show databases | where DatabaseName contains filterValue",
-            new Dictionary<string, string> { ["filterValue"] = "'ddtel'" },
+            new Dictionary<string, string> { ["filterValue"] = "'Sam'" },
             CancellationToken.None);
 
         Assert.NotNull(handler.LastRequestBody);
         using var requestDocument = JsonDocument.Parse(handler.LastRequestBody!);
         var propertiesElement = requestDocument.RootElement.GetProperty("properties");
-        Assert.Equal("'ddtel'", propertiesElement.GetProperty("Parameters").GetProperty("filterValue").GetString());
+        Assert.Equal("'Sam'", propertiesElement.GetProperty("Parameters").GetProperty("filterValue").GetString());
     }
 
     private sealed class StaticTokenProvider(string token) : ITokenProvider

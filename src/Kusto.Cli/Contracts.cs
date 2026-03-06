@@ -27,7 +27,12 @@ public interface IKustoService
         string command,
         IReadOnlyDictionary<string, string>? queryParameters,
         CancellationToken cancellationToken);
-    Task<TabularData> ExecuteQueryAsync(string clusterUrl, string database, string query, CancellationToken cancellationToken);
+    Task<QueryExecutionResult> ExecuteQueryAsync(
+        string clusterUrl,
+        string database,
+        string query,
+        bool includeStatistics,
+        CancellationToken cancellationToken);
 }
 
 public interface IOutputFormatter
