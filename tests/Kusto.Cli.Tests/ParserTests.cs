@@ -47,10 +47,74 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_Examples_AcceptsAlias()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["example"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_ClusterAliases_AcceptPluralListAndUse()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["clusters", "use", "help"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_DatabaseCommandAlias_IsAccepted()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["db", "use", "Samples", "--cluster", "help"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_TableAliases_AcceptPluralLsDbAndLimit()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["tables", "ls", "--cluster", "help", "--db", "Samples", "--limit", "10"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_TableSchemaAlias_IsAccepted()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["table", "schema", "StormEvents", "--cluster", "help", "--db", "Samples"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_QueryAliases_AcceptRunAndFileAlias()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["run", "-f", "query.kql", "--cluster", "help", "--db", "Samples"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
     public void Parse_Query_AcceptsShowStats()
     {
         var rootCommand = CommandFactory.CreateRootCommand();
         var result = rootCommand.Parse(["query", "print 1", "--show-stats"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_ClusterAdd_AcceptsUseFlag()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["cluster", "add", "help", "https://help.kusto.windows.net/", "--use"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_ExamplesAliases_AcceptsAliasesCommand()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["aliases"], new ParserConfiguration());
         Assert.Empty(result.Errors);
     }
 }
