@@ -19,6 +19,36 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
         IReadOnlyDictionary<string, string>? queryParameters,
         CancellationToken cancellationToken)
     {
+        return ExecuteManagementCommandCoreAsync(clusterUrl, database, command, queryParameters, cancellationToken);
+    }
+
+    public async Task<QueryExecutionResult> ExecuteQueryAsync(
+        string clusterUrl,
+        string database,
+        string query,
+        bool includeStatistics,
+        CancellationToken cancellationToken)
+    {
+        var tables = await ExecuteAsync(
+            clusterUrl,
+            "/v2/rest/query",
+            new KustoRequestPayload { Db = database, Csl = query },
+            cancellationToken);
+        var primaryResult = SelectPrimaryResult(tables);
+
+        return new QueryExecutionResult(
+            new TabularData(primaryResult.Columns, primaryResult.Rows),
+            KustoWebExplorerUrlBuilder.Build(clusterUrl, database, query),
+            includeStatistics ? KustoQueryStatisticsExtractor.Extract(tables) : null);
+    }
+
+    private async Task<TabularData> ExecuteManagementCommandCoreAsync(
+        string clusterUrl,
+        string? database,
+        string command,
+        IReadOnlyDictionary<string, string>? queryParameters,
+        CancellationToken cancellationToken)
+    {
         var db = string.IsNullOrWhiteSpace(database) ? "NetDefaultDB" : database;
         var payload = new KustoRequestPayload
         {
@@ -34,15 +64,12 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
             };
         }
 
-        return ExecuteAsync(clusterUrl, "/v1/rest/mgmt", payload, cancellationToken);
+        var tables = await ExecuteAsync(clusterUrl, "/v1/rest/mgmt", payload, cancellationToken);
+        var primaryResult = SelectPrimaryResult(tables);
+        return new TabularData(primaryResult.Columns, primaryResult.Rows);
     }
 
-    public Task<TabularData> ExecuteQueryAsync(string clusterUrl, string database, string query, CancellationToken cancellationToken)
-    {
-        return ExecuteAsync(clusterUrl, "/v2/rest/query", new KustoRequestPayload { Db = database, Csl = query }, cancellationToken);
-    }
-
-    private async Task<TabularData> ExecuteAsync(
+    private async Task<List<ParsedKustoTable>> ExecuteAsync(
         string clusterUrl,
         string endpointPath,
         KustoRequestPayload payload,
@@ -73,13 +100,16 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
             throw new UserFacingException("Kusto response did not contain any result tables.");
         }
 
-        var table =
+        return tables;
+    }
+
+    private static ParsedKustoTable SelectPrimaryResult(List<ParsedKustoTable> tables)
+    {
+        return
             tables.FirstOrDefault(t => string.Equals(t.TableKind, "PrimaryResult", StringComparison.OrdinalIgnoreCase)) ??
             tables.FirstOrDefault(t => string.Equals(t.TableName, "PrimaryResult", StringComparison.OrdinalIgnoreCase)) ??
             tables.FirstOrDefault(t => t.Rows.Count > 0) ??
             tables[0];
-
-        return new TabularData(table.Columns, table.Rows);
     }
 
     private static List<ParsedKustoTable> ParseTables(string responseBody)
@@ -236,7 +266,7 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
                 ? "Kusto rejected the query or command. Check your syntax and verify the selected cluster and database."
                 : $"Kusto rejected the query or command: {detail}",
             HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
-                "Kusto rejected this request because your identity does not have access. Run 'az login' and verify access to the cluster and database.",
+                "Kusto rejected this request because your identity does not have access. Run 'az login' and verify access to the cluster and database. For sovereign clouds, make sure Azure CLI is set to the matching cloud with 'az cloud set'.",
             _ => string.IsNullOrWhiteSpace(detail)
                 ? "Kusto request failed. Verify the cluster, database, and your access."
                 : $"Kusto request failed: {detail}"
@@ -282,10 +312,4 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
 
         return null;
     }
-
-    private sealed record ParsedKustoTable(
-        string? TableName,
-        string? TableKind,
-        IReadOnlyList<string> Columns,
-        IReadOnlyList<IReadOnlyList<string?>> Rows);
 }

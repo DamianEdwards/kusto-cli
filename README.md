@@ -8,6 +8,10 @@ A native command-line tool for Azure Data Explorer (Kusto), focused on quick exp
 - Manage databases and defaults (`database` command group)
 - Browse tables and schemas (`table` command group)
 - Run KQL from inline text, files, or stdin (`query`)
+- Show copy/paste-ready examples and aliases (`examples`)
+- Include Azure Data Explorer Web Explorer deeplinks in query results
+- Show optional query execution statistics with `--show-stats`
+- Basic public, US Government, and China cloud support for token audience selection and Web Explorer links
 - Multiple output formats (`human`, `json`, `markdown`/`md`)
 - Configurable log verbosity with structured console/file logging
 
@@ -20,17 +24,25 @@ If your current credential chain cannot authenticate to Kusto, sign in with Azur
 az login
 ```
 
+For sovereign clouds, set Azure CLI to the matching cloud before signing in (for example `az cloud set --name AzureUSGovernment` or `az cloud set --name AzureChinaCloud`). The CLI currently auto-selects Kusto token audiences and Web Explorer bases for public, US Government, and China cluster URLs.
+
 ## Quick start
 
 ```powershell
 # 1) Add a cluster (first cluster becomes default automatically)
 kusto cluster add help https://help.kusto.windows.net/
 
+# Or add and make it the default in one step
+kusto cluster add help https://help.kusto.windows.net/ --use
+
 # 2) Set default database for that cluster
 kusto database set-default Samples --cluster help
 
 # 3) Run a query
 kusto query "StormEvents | take 5"
+
+# Need copy/paste examples?
+kusto examples
 ```
 
 ## Configuration
@@ -61,9 +73,10 @@ These options are available on all commands:
 
 | Command | Purpose | Arguments | Options |
 |---|---|---|---|
+| `examples` | Show usage examples, aliases, and quick-start commands. | none | global options |
 | `cluster list` | List configured clusters and defaults. | none | global options |
 | `cluster show <cluster>` | Show details for one known cluster. | `cluster` (name or URL) | global options |
-| `cluster add <name> <url>` | Add a cluster to local config. | `name`, `url` | global options |
+| `cluster add <name> <url>` | Add a cluster to local config. | `name`, `url` | `--use`, global options |
 | `cluster remove <cluster>` | Remove a known cluster and its default DB mapping. | `cluster` (name or URL) | global options |
 | `cluster set-default <cluster>` | Set the default cluster. | `cluster` (name or URL) | global options |
 | `database list` | List databases in a cluster. | none | `--cluster`, `--filter`, `--take`, global options |
@@ -71,17 +84,38 @@ These options are available on all commands:
 | `database set-default <database>` | Set default database for a cluster. | `database` | `--cluster`, global options |
 | `table list` | List tables in a database. | none | `--cluster`, `--database`, `--filter`, `--take`, global options |
 | `table show <table>` | Show schema/details for one table. | `table` | `--cluster`, `--database`, global options |
-| `query [<query>]` | Run KQL from inline text, file, or stdin. | optional `query` | `--file`, `--cluster`, `--database`, global options |
+| `query [<query>]` | Run KQL from inline text, file, or stdin. | optional `query` | `--file`, `--cluster`, `--database`, `--show-stats`, global options |
 
 ## Command-specific option details
 
 | Option | Commands | Description |
 |---|---|---|
 | `--cluster <name|url>` | `database *`, `table *`, `query` | Cluster to use. If omitted, default cluster is used. |
-| `--database <database>` | `table *`, `query` | Database to use. If omitted, default DB for selected cluster is used. |
+| `--database <database>` | `table *`, `query` | Database to use. Alias: `--db`. If omitted, default DB for selected cluster is used. |
 | `--filter <value>` | `database list`, `table list` | Name filter. Supports contains/startswith/endswith semantics using anchors (see below). |
-| `--take <int>` | `database list`, `table list` | Limits number of rows returned. Must be a positive integer. |
-| `--file <path>` | `query` | Read query text from file. Cannot be combined with inline query argument. |
+| `--take <int>` | `database list`, `table list` | Limits number of rows returned. Alias: `--limit`. Must be a positive integer. |
+| `--use` | `cluster add` | Also set the added cluster as the active/default cluster. |
+| `--file <path>` | `query` | Read query text from file. Alias: `-f`. Cannot be combined with inline query argument. |
+| `--show-stats` | `query` | Include query execution statistics when Kusto returns them. |
+
+## Optional aliases
+
+Canonical command names are used in the examples above. These aliases are still available when you want shorter forms:
+
+| Canonical | Aliases |
+|---|---|
+| `examples` | `example`, `aliases` |
+| `cluster` | `clusters` |
+| `database` | `databases`, `db` |
+| `table` | `tables` |
+| `query` | `run`, `exec` |
+| `list` | `ls` |
+| `show` | `get` (`table show` also supports `schema`) |
+| `remove` | `rm`, `delete` |
+| `set-default` | `use` |
+| `--database` | `--db` |
+| `--take` | `--limit` |
+| `--file` | `-f` |
 
 ### `--filter` semantics
 
@@ -154,6 +188,9 @@ StormEvents
 | where StartTime > ago(7d)
 | take 20
 "@ | kusto query - --cluster help --database Samples
+
+# Query with execution statistics when available
+kusto query "StormEvents | summarize Count=count() by State" --cluster help --database Samples --show-stats
 ```
 
 ## Output formats
@@ -168,6 +205,8 @@ kusto database list --cluster help --format json
 # Markdown for docs/issues
 kusto query "StormEvents | take 3" --cluster help --database Samples --format markdown
 ```
+
+Human and markdown output show a short `Open in Web Explorer` link when available instead of printing the raw `webExplorerUrl`; JSON output still includes `webExplorerUrl`, and `--show-stats` adds `statistics`.
 
 ## Logging
 

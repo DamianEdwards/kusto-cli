@@ -8,6 +8,10 @@ public sealed class CliOutput
     public string? Message { get; init; }
     public TabularData? Table { get; init; }
     public Dictionary<string, string?>? Properties { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WebExplorerUrl { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public QueryStatistics? Statistics { get; init; }
     [JsonIgnore]
     public bool IsQueryResultTable { get; init; }
 }
@@ -33,6 +37,89 @@ public sealed class TabularData(IReadOnlyList<string> columns, IReadOnlyList<IRe
         columnIndex = -1;
         return false;
     }
+}
+
+public sealed class QueryExecutionResult(TabularData table, string? webExplorerUrl, QueryStatistics? statistics)
+{
+    public TabularData Table { get; } = table;
+    public string? WebExplorerUrl { get; } = webExplorerUrl;
+    public QueryStatistics? Statistics { get; } = statistics;
+}
+
+public sealed class QueryStatistics
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? ExecutionTimeSec { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public QueryCpuStatistics? Cpu { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? MemoryPeakPerNodeMb { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public QueryCacheStatistics? Cache { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public QueryNetworkStatistics? Network { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public QueryCountStatistics? Extents { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public QueryCountStatistics? Rows { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public QueryResultStatistics? Result { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, QueryCrossClusterStatistics>? CrossClusterBreakdown { get; init; }
+}
+
+public sealed class QueryCpuStatistics
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Total { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? QueryExecution { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? QueryPlanning { get; init; }
+}
+
+public sealed class QueryCacheStatistics
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? HotHitMb { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? HotMissMb { get; init; }
+}
+
+public sealed class QueryNetworkStatistics
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? CrossClusterMb { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? InterClusterMb { get; init; }
+}
+
+public sealed class QueryCountStatistics
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Scanned { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Total { get; init; }
+}
+
+public sealed class QueryResultStatistics
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RowCount { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? SizeKb { get; init; }
+}
+
+public sealed class QueryCrossClusterStatistics
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CpuTotal { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? MemoryPeakMb { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? CacheHitMb { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? CacheMissMb { get; init; }
 }
 
 public sealed class KustoConfig
@@ -84,4 +171,12 @@ internal sealed class KustoResponseColumn
 {
     public string? ColumnName { get; set; }
     public string? DataType { get; set; }
+}
+
+internal sealed class ParsedKustoTable(string? tableName, string? tableKind, IReadOnlyList<string> columns, IReadOnlyList<IReadOnlyList<string?>> rows)
+{
+    public string? TableName { get; } = tableName;
+    public string? TableKind { get; } = tableKind;
+    public IReadOnlyList<string> Columns { get; } = columns;
+    public IReadOnlyList<IReadOnlyList<string?>> Rows { get; } = rows;
 }

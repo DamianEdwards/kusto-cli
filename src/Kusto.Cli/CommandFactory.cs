@@ -8,7 +8,7 @@ public static class CommandFactory
     {
         var formatOption = new Option<string>("--format")
         {
-            Description = "Output format: human, json, markdown, md.",
+            Description = "Output format for people or tools: human, json, markdown, md.",
             Recursive = true,
             DefaultValueFactory = _ => "human"
         };
@@ -16,14 +16,15 @@ public static class CommandFactory
 
         var logLevelOption = new Option<string?>("--log-level")
         {
-            Description = "Set log level (Trace, Debug, Information, Warning, Error, Critical, None).",
+            Description = "Console log level (Trace, Debug, Information, Warning, Error, Critical, None).",
             Recursive = true
         };
 
-        var root = new RootCommand("A native command-line tool for Azure Data Explorer (Kusto).")
+        var root = new RootCommand("Query Azure Data Explorer (Kusto) from the terminal: save clusters, pick defaults, inspect databases and tables, and run KQL.")
         {
             formatOption,
             logLevelOption,
+            BuildExamplesCommand(formatOption, logLevelOption),
             BuildClusterCommand(formatOption, logLevelOption),
             BuildDatabaseCommand(formatOption, logLevelOption),
             BuildTableCommand(formatOption, logLevelOption),
@@ -32,11 +33,42 @@ public static class CommandFactory
         return root;
     }
 
+    private static Command BuildExamplesCommand(Option<string> formatOption, Option<string?> logLevelOption)
+    {
+        var examplesCommand = new Command("examples", "Show usage examples, aliases, and quick-start commands.");
+        examplesCommand.Aliases.Add("example");
+        examplesCommand.Aliases.Add("aliases");
+        examplesCommand.SetAction((parseResult, cancellationToken) =>
+        {
+            var format = parseResult.GetRequiredValue(formatOption);
+            var logLevel = parseResult.GetValue(logLevelOption);
+            return CliRunner.RunAsync(format, logLevel, static (_, _) =>
+                Task.FromResult(new CliOutput
+                {
+                                        Table = new TabularData(
+                        ["Section", "Example"],
+                        [
+                            ["Quick start", "kusto cluster add help https://help.kusto.windows.net/ --use"],
+                            ["Quick start", "kusto database set-default Samples --cluster help"],
+                            ["Browse", "kusto table list --cluster help --database Samples --filter \"^Storm\" --take 10"],
+                            ["Browse", "kusto table show StormEvents --cluster help --database Samples"],
+                            ["Run KQL", "kusto query \"StormEvents | take 5\" --cluster help --database Samples"],
+                            ["Run KQL", "kusto query --file .\\queries\\top-states.kql --cluster help --database Samples"],
+                            ["Optional aliases", "aliases | clusters | db | databases | tables | ls | get | schema | rm | delete | use | run | exec | --db | --limit | -f"]
+                        ])
+                }), cancellationToken);
+        });
+
+        return examplesCommand;
+    }
+
     private static Command BuildClusterCommand(Option<string> formatOption, Option<string?> logLevelOption)
     {
-        var clusterCommand = new Command("cluster", "Manage known clusters.");
+        var clusterCommand = new Command("cluster", "Manage saved clusters and the active cluster.");
+        clusterCommand.Aliases.Add("clusters");
 
-        var listCommand = new Command("list", "List known clusters.");
+        var listCommand = new Command("list", "List saved clusters and show which one is active.");
+        listCommand.Aliases.Add("ls");
         listCommand.SetAction((parseResult, cancellationToken) =>
         {
             var format = parseResult.GetRequiredValue(formatOption);
@@ -74,13 +106,14 @@ public static class CommandFactory
 
         var clusterReferenceArgument = new Argument<string>("cluster")
         {
-            Description = "Cluster name or URL."
+            Description = "Saved cluster name or cluster URL."
         };
 
-        var showCommand = new Command("show", "Show a known cluster.")
+        var showCommand = new Command("show", "Show a saved cluster, including its URL and default database.")
         {
             clusterReferenceArgument
         };
+        showCommand.Aliases.Add("get");
         showCommand.SetAction((parseResult, cancellationToken) =>
         {
             var format = parseResult.GetRequiredValue(formatOption);
@@ -107,17 +140,20 @@ public static class CommandFactory
             }, cancellationToken);
         });
 
-        var addCommand = new Command("add", "Add a known cluster.");
+        var addCommand = new Command("add", "Save a cluster name and URL for reuse. Use --use to also make it the default.");
         var clusterNameArgument = new Argument<string>("name") { Description = "Friendly cluster name." };
-        var clusterUrlArgument = new Argument<string>("url") { Description = "Cluster URL." };
+        var clusterUrlArgument = new Argument<string>("url") { Description = "Azure Data Explorer cluster URL." };
+        var useOption = new Option<bool>("--use") { Description = "Also set this cluster as the active/default cluster." };
         addCommand.Add(clusterNameArgument);
         addCommand.Add(clusterUrlArgument);
+        addCommand.Add(useOption);
         addCommand.SetAction((parseResult, cancellationToken) =>
         {
             var format = parseResult.GetRequiredValue(formatOption);
             var logLevel = parseResult.GetValue(logLevelOption);
             var name = parseResult.GetRequiredValue(clusterNameArgument);
             var url = parseResult.GetRequiredValue(clusterUrlArgument);
+            var setAsDefault = parseResult.GetValue(useOption);
 
             return CliRunner.RunAsync(format, logLevel, async (runtime, ct) =>
             {
@@ -139,20 +175,25 @@ public static class CommandFactory
                     Url = normalizedUrl
                 });
 
-                if (string.IsNullOrWhiteSpace(config.DefaultClusterUrl))
+                if (setAsDefault || string.IsNullOrWhiteSpace(config.DefaultClusterUrl))
                 {
                     config.DefaultClusterUrl = normalizedUrl;
                 }
 
                 await runtime.ConfigStore.SaveAsync(config, ct);
-                return new CliOutput { Message = $"Added cluster '{name}' ({normalizedUrl})." };
+                var message = setAsDefault
+                    ? $"Added cluster '{name}' ({normalizedUrl}) and set it as default."
+                    : $"Added cluster '{name}' ({normalizedUrl}).";
+                return new CliOutput { Message = message };
             }, cancellationToken);
         });
 
-        var removeCommand = new Command("remove", "Remove a known cluster.")
+        var removeCommand = new Command("remove", "Remove a saved cluster and its default database mapping.")
         {
             clusterReferenceArgument
         };
+        removeCommand.Aliases.Add("rm");
+        removeCommand.Aliases.Add("delete");
         removeCommand.SetAction((parseResult, cancellationToken) =>
         {
             var format = parseResult.GetRequiredValue(formatOption);
@@ -178,10 +219,11 @@ public static class CommandFactory
             }, cancellationToken);
         });
 
-        var setDefaultCommand = new Command("set-default", "Set the default cluster.")
+        var setDefaultCommand = new Command("set-default", "Set the active/default cluster used when --cluster is omitted.")
         {
             clusterReferenceArgument
         };
+        setDefaultCommand.Aliases.Add("use");
         setDefaultCommand.SetAction((parseResult, cancellationToken) =>
         {
             var format = parseResult.GetRequiredValue(formatOption);
@@ -210,27 +252,21 @@ public static class CommandFactory
 
     private static Command BuildDatabaseCommand(Option<string> formatOption, Option<string?> logLevelOption)
     {
-        var clusterOption = new Option<string?>("--cluster")
-        {
-            Description = "Cluster name or URL to use."
-        };
-        var filterOption = new Option<string?>("--filter")
-        {
-            Description = "Filter by database name. Use ^prefix for startswith and suffix$ for endswith."
-        };
-        var takeOption = new Option<int?>("--take")
-        {
-            Description = "Maximum number of databases to return."
-        };
+        var clusterOption = CreateClusterOption();
+        var filterOption = CreateFilterOption("database");
+        var takeOption = CreateTakeOption("databases");
 
-        var databaseCommand = new Command("database", "Manage databases and defaults.");
+        var databaseCommand = new Command("database", "Inspect databases and manage the active database.");
+        databaseCommand.Aliases.Add("databases");
+        databaseCommand.Aliases.Add("db");
 
-        var listCommand = new Command("list", "List databases.")
+        var listCommand = new Command("list", "List databases in a cluster. Use --filter or --limit to narrow results.")
         {
             clusterOption,
             filterOption,
             takeOption
         };
+        listCommand.Aliases.Add("ls");
         listCommand.SetAction((parseResult, cancellationToken) =>
         {
             var clusterReference = parseResult.GetValue(clusterOption);
@@ -273,11 +309,12 @@ public static class CommandFactory
             Description = "Database name."
         };
 
-        var showCommand = new Command("show", "Show a database.")
+        var showCommand = new Command("show", "Show details for a database.")
         {
             databaseArgument,
             clusterOption
         };
+        showCommand.Aliases.Add("get");
         showCommand.SetAction((parseResult, cancellationToken) =>
         {
             var databaseName = parseResult.GetRequiredValue(databaseArgument);
@@ -304,11 +341,12 @@ public static class CommandFactory
             }, cancellationToken);
         });
 
-        var setDefaultCommand = new Command("set-default", "Set default database for a cluster.")
+        var setDefaultCommand = new Command("set-default", "Set the default database used for a cluster when --database is omitted.")
         {
             databaseArgument,
             clusterOption
         };
+        setDefaultCommand.Aliases.Add("use");
         setDefaultCommand.SetAction((parseResult, cancellationToken) =>
         {
             var databaseName = parseResult.GetRequiredValue(databaseArgument);
@@ -345,33 +383,23 @@ public static class CommandFactory
 
     private static Command BuildTableCommand(Option<string> formatOption, Option<string?> logLevelOption)
     {
-        var clusterOption = new Option<string?>("--cluster")
-        {
-            Description = "Cluster name or URL to use."
-        };
+        var clusterOption = CreateClusterOption();
 
-        var databaseOption = new Option<string?>("--database")
-        {
-            Description = "Database name to use."
-        };
-        var filterOption = new Option<string?>("--filter")
-        {
-            Description = "Filter by table name. Use ^prefix for startswith and suffix$ for endswith."
-        };
-        var takeOption = new Option<int?>("--take")
-        {
-            Description = "Maximum number of tables to return."
-        };
+        var databaseOption = CreateDatabaseOption();
+        var filterOption = CreateFilterOption("table");
+        var takeOption = CreateTakeOption("tables");
 
-        var tableCommand = new Command("table", "Browse tables and schemas.");
+        var tableCommand = new Command("table", "Browse tables and inspect schema.");
+        tableCommand.Aliases.Add("tables");
 
-        var listCommand = new Command("list", "List tables in a database.")
+        var listCommand = new Command("list", "List tables in a database. Use --filter or --limit to narrow results.")
         {
             clusterOption,
             databaseOption,
             filterOption,
             takeOption
         };
+        listCommand.Aliases.Add("ls");
         listCommand.SetAction((parseResult, cancellationToken) =>
         {
             var clusterReference = parseResult.GetValue(clusterOption);
@@ -408,12 +436,14 @@ public static class CommandFactory
             Description = "Table name."
         };
 
-        var showCommand = new Command("show", "Show table schema.")
+        var showCommand = new Command("show", "Show table schema and column details.")
         {
             tableArgument,
             clusterOption,
             databaseOption
         };
+        showCommand.Aliases.Add("get");
+        showCommand.Aliases.Add("schema");
         showCommand.SetAction((parseResult, cancellationToken) =>
         {
             var tableName = parseResult.GetRequiredValue(tableArgument);
@@ -455,39 +485,38 @@ public static class CommandFactory
 
     private static Command BuildQueryCommand(Option<string> formatOption, Option<string?> logLevelOption)
     {
-        var queryCommand = new Command("query", "Run a KQL query from argument, --file, or stdin.");
+        var queryCommand = new Command("query", "Run KQL from inline text, --file/-f, or stdin against the selected cluster and database.");
+        queryCommand.Aliases.Add("run");
+        queryCommand.Aliases.Add("exec");
 
         var queryArgument = new Argument<string?>("query")
         {
-            Description = "Inline query text or '-' for stdin.",
+            Description = "Inline KQL text, or '-' to read KQL from stdin.",
             Arity = ArgumentArity.ZeroOrOne
         };
 
-        var queryFileOption = new Option<FileInfo?>("--file")
-        {
-            Description = "Path to a file containing KQL query text."
-        };
+        var queryFileOption = CreateQueryFileOption();
 
-        var clusterOption = new Option<string?>("--cluster")
-        {
-            Description = "Cluster name or URL to use."
-        };
+        var clusterOption = CreateClusterOption();
 
-        var databaseOption = new Option<string?>("--database")
+        var databaseOption = CreateDatabaseOption();
+        var showStatsOption = new Option<bool>("--show-stats")
         {
-            Description = "Database name to use."
+            Description = "Include query execution statistics when Kusto returns them."
         };
 
         queryCommand.Add(queryArgument);
         queryCommand.Add(queryFileOption);
         queryCommand.Add(clusterOption);
         queryCommand.Add(databaseOption);
+        queryCommand.Add(showStatsOption);
         queryCommand.SetAction((parseResult, cancellationToken) =>
         {
             var queryText = parseResult.GetValue(queryArgument);
             var queryFile = parseResult.GetValue(queryFileOption);
             var clusterReference = parseResult.GetValue(clusterOption);
             var databaseName = parseResult.GetValue(databaseOption);
+            var showStats = parseResult.GetValue(showStatsOption);
             var format = parseResult.GetRequiredValue(formatOption);
             var logLevel = parseResult.GetValue(logLevelOption);
 
@@ -507,13 +536,66 @@ public static class CommandFactory
                     resolvedCluster.Url,
                     resolvedDatabase,
                     query,
+                    showStats,
                     ct);
 
-                return new CliOutput { Table = result };
+                return new CliOutput
+                {
+                    Table = result.Table,
+                    WebExplorerUrl = result.WebExplorerUrl,
+                    Statistics = result.Statistics,
+                    IsQueryResultTable = true
+                };
             }, cancellationToken);
         });
 
         return queryCommand;
+    }
+
+    private static Option<string?> CreateClusterOption()
+    {
+        return new Option<string?>("--cluster")
+        {
+            Description = "Saved cluster name or cluster URL to use. If omitted, the active/default cluster is used."
+        };
+    }
+
+    private static Option<string?> CreateDatabaseOption()
+    {
+        var option = new Option<string?>("--database")
+        {
+            Description = "Database name to use. If omitted, the default database for the selected cluster is used."
+        };
+        option.Aliases.Add("--db");
+        return option;
+    }
+
+    private static Option<string?> CreateFilterOption(string itemName)
+    {
+        return new Option<string?>("--filter")
+        {
+            Description = $"Filter by {itemName} name. Supports plain text, ^prefix, suffix$, or ^exact$."
+        };
+    }
+
+    private static Option<int?> CreateTakeOption(string itemName)
+    {
+        var option = new Option<int?>("--take")
+        {
+            Description = $"Maximum number of {itemName} to return. Alias: --limit."
+        };
+        option.Aliases.Add("--limit");
+        return option;
+    }
+
+    private static Option<FileInfo?> CreateQueryFileOption()
+    {
+        var option = new Option<FileInfo?>("--file")
+        {
+            Description = "Path to a file containing KQL query text. Alias: -f."
+        };
+        option.Aliases.Add("-f");
+        return option;
     }
 
     private static int GetPreferredColumnIndex(TabularData table, string preferredColumnName)
