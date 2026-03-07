@@ -96,7 +96,7 @@ These options are available on all commands:
 
 | Option | Commands | Description |
 |---|---|---|
-| `--cluster <name|url>` | `database *`, `table *`, `query` | Cluster to use. If omitted, default cluster is used. |
+| `--cluster <name\|url>` | `database *`, `table *`, `query` | Cluster to use. If omitted, default cluster is used. |
 | `--database <database>` | `table *`, `query` | Database to use. Alias: `--db`. If omitted, default DB for selected cluster is used. |
 | `--filter <value>` | `database list`, `table list` | Name filter. Supports contains/startswith/endswith semantics using anchors (see below). |
 | `--take <int>` | `database list`, `table list` | Limits number of rows returned. Alias: `--limit`. Must be a positive integer. |
