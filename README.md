@@ -231,7 +231,7 @@ The repository includes four GitHub Actions workflows:
 
 - `pr.yml` - restore/build/test validation for pull requests across Ubuntu, Windows, and macOS
 - `ci.yml` - version calculation, build/test validation, native asset publishing, and dev draft release updates on `main`
-- `release.yml` - manual promotion of the prebuilt RC bundle into a GitHub release without rebuilding
+- `release.yml` - manual promotion of the prebuilt RC bundle into a GitHub release, including Windows executable signing, without rebuilding
 - `bump-version.yml` - manual semantic-version / phase transitions for `pre`, `rc`, and `rtm`
 
 Version state is stored in the body of the draft `dev` release so CI can calculate the next development and release-candidate versions without committing version files into the repo.
@@ -241,12 +241,12 @@ Version state is stored in the body of the draft `dev` release so CI can calcula
 1. Open a pull request and let `pr.yml` validate restore/build/test behavior.
 2. Merge to `main`, which lets `ci.yml` calculate versions, publish native assets, and refresh the draft `dev` release.
 3. When you want to move between `pre`, `rc`, or `rtm`, run `bump-version.yml`.
-4. When the RC bundle is the one you want to ship, run `release.yml` to promote those already-built artifacts into the GitHub release.
+4. When the RC bundle is the one you want to ship, run `release.yml` to sign the Windows executables and promote those already-built artifacts into the GitHub release.
 5. The next push to `main` refreshes the draft `dev` release for ongoing development.
 
 ## Native release asset layout
 
-CI publishes native assets for:
+CI publishes unsigned native assets for:
 
 - `win-x64`
 - `win-arm64`
@@ -261,6 +261,7 @@ Release assets are intentionally shaped for stable download URLs and easy platfo
 - Linux/macOS: tarballs such as `kusto-linux-x64.tar.gz`
 - Archive contents: `kusto.exe` on Windows, `kusto` on Linux/macOS, plus `LICENSE`
 - Bundles always include `checksums.txt` and `release-metadata.json`
+- `release.yml` re-signs the Windows archives before publishing the final GitHub release, leaving Linux and macOS assets untouched
 
 If you want to generate the same release-shaped outputs locally, use the helper scripts instead of calling `dotnet publish` directly:
 
