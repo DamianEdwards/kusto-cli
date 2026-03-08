@@ -28,6 +28,40 @@ az login
 
 For sovereign clouds, set Azure CLI to the matching cloud before signing in (for example `az cloud set --name AzureUSGovernment` or `az cloud set --name AzureChinaCloud`). The CLI currently auto-selects Kusto token audiences and Web Explorer bases for public, US Government, and China cluster URLs.
 
+## Installer script (Windows)
+
+The repository publishes a signed Windows installer script at a stable release URL:
+
+```powershell
+https://github.com/DamianEdwards/kusto-cli/releases/download/install-scripts/install.ps1
+```
+
+Example usage:
+
+```powershell
+# Stable (default)
+irm 'https://github.com/DamianEdwards/kusto-cli/releases/download/install-scripts/install.ps1' | iex
+
+# Include prereleases
+& ([scriptblock]::Create((irm 'https://github.com/DamianEdwards/kusto-cli/releases/download/install-scripts/install.ps1'))) -Quality PreRelease
+
+# Development build (unsigned assets): prompts for confirmation unless -Force is supplied
+& ([scriptblock]::Create((irm 'https://github.com/DamianEdwards/kusto-cli/releases/download/install-scripts/install.ps1'))) -Quality Dev -Force
+
+# Install to a custom location without modifying PATH
+& ([scriptblock]::Create((irm 'https://github.com/DamianEdwards/kusto-cli/releases/download/install-scripts/install.ps1'))) -TargetPath 'C:\tools\kusto\bin' -UpdatePath:$false
+```
+
+Installer behavior:
+
+- Script path in this repo: `scripts/install/install-kusto-cli.ps1`
+- Supports `-Quality Dev|PreRelease|Stable` (default: `Stable`)
+- Supports `-TargetPath` (default: `%USERPROFILE%\.kusto\bin`)
+- Supports `-UpdatePath` (default: `true`)
+- Replaces existing `kusto.exe` only when the downloaded version is newer
+- Updates current-session and user PATH to include the target directory when `-UpdatePath` is `true`
+- On non-Windows PowerShell, exits with a clear "not yet supported" message
+
 ## Quick start
 
 ```powershell

@@ -1,0 +1,720 @@
+[CmdletBinding()]
+param(
+    [ValidateSet('Dev', 'PreRelease', 'Stable')]
+    [string]$Quality = 'Stable',
+
+    [switch]$Force,
+
+    [string]$TargetPath = (Join-Path $env:USERPROFILE '.kusto\bin'),
+
+    [bool]$UpdatePath = $true,
+
+    [string]$Repository = 'DamianEdwards/kusto-cli',
+
+    [string]$ExpectedSignerSubject = 'CN=Damian Edwards, O=Damian Edwards, L=Issaquah, S=Washington, C=US'
+)
+
+$ErrorActionPreference = 'Stop'
+
+$runningOnWindows = if (Get-Variable -Name IsWindows -ErrorAction SilentlyContinue)
+{
+    [bool]$IsWindows
+}
+else
+{
+    [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
+}
+
+if (-not $runningOnWindows)
+{
+    $scriptName = if ($MyInvocation.MyCommand.Name) { $MyInvocation.MyCommand.Name } else { 'install-kusto-cli.ps1' }
+    Write-Error "$scriptName currently supports Windows only. Running on '$([System.Runtime.InteropServices.RuntimeInformation]::OSDescription)' is not yet supported."
+    exit 1
+}
+
+function Normalize-PathEntry
+{
+    param([Parameter(Mandatory)][string]$PathEntry)
+
+    return $PathEntry.Trim().TrimEnd('\').ToLowerInvariant()
+}
+
+function Ensure-PathContains
+{
+    param(
+        [Parameter(Mandatory)][string]$Entry,
+        [Parameter(Mandatory)][System.EnvironmentVariableTarget]$Target
+    )
+
+    $current = [System.Environment]::GetEnvironmentVariable('PATH', $Target)
+    $existingEntries = @()
+    if (-not [string]::IsNullOrWhiteSpace($current))
+    {
+        $existingEntries = @($current.Split(';', [System.StringSplitOptions]::RemoveEmptyEntries))
+    }
+
+    $normalizedTarget = Normalize-PathEntry -PathEntry $Entry
+    $alreadyPresent = $existingEntries | Where-Object { (Normalize-PathEntry -PathEntry $_) -eq $normalizedTarget } | Select-Object -First 1
+    if ($alreadyPresent)
+    {
+        return $false
+    }
+
+    $updated = if ([string]::IsNullOrWhiteSpace($current))
+    {
+        $Entry
+    }
+    else
+    {
+        $current.TrimEnd(';') + ';' + $Entry
+    }
+
+    [System.Environment]::SetEnvironmentVariable('PATH', $updated, $Target)
+    return $true
+}
+
+function Get-HttpStatusCode
+{
+    param([Parameter(Mandatory)][System.Exception]$Exception)
+
+    $responseProperty = $Exception.PSObject.Properties['Response']
+    if ($null -eq $responseProperty -or $null -eq $Exception.Response)
+    {
+        return $null
+    }
+
+    try
+    {
+        return [int]$Exception.Response.StatusCode
+    }
+    catch
+    {
+        return $null
+    }
+}
+
+function Invoke-GitHubApi
+{
+    param([Parameter(Mandatory)][string]$Uri)
+
+    $token = if (-not [string]::IsNullOrWhiteSpace($env:GH_TOKEN))
+    {
+        $env:GH_TOKEN
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN))
+    {
+        $env:GITHUB_TOKEN
+    }
+    else
+    {
+        $null
+    }
+
+    $headers = @{
+        Accept       = 'application/vnd.github+json'
+        'User-Agent' = 'kusto-cli-install-script'
+    }
+    if ($token)
+    {
+        $headers.Authorization = "Bearer $token"
+    }
+
+    return Invoke-RestMethod -Method Get -Uri $Uri -Headers $headers
+}
+
+function Invoke-GitHubAssetDownload
+{
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [Parameter(Mandatory)][string]$OutFile
+    )
+
+    $token = if (-not [string]::IsNullOrWhiteSpace($env:GH_TOKEN))
+    {
+        $env:GH_TOKEN
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN))
+    {
+        $env:GITHUB_TOKEN
+    }
+    else
+    {
+        $null
+    }
+
+    $headers = @{
+        'User-Agent' = 'kusto-cli-install-script'
+    }
+    if ($token)
+    {
+        $headers.Authorization = "Bearer $token"
+    }
+
+    Invoke-WebRequest -Uri $Uri -Headers $headers -OutFile $OutFile
+}
+
+function Get-ReleaseByTag
+{
+    param(
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][string]$Tag
+    )
+
+    $tagUri = "https://api.github.com/repos/$Repo/releases/tags/$Tag"
+    try
+    {
+        return Invoke-GitHubApi -Uri $tagUri
+    }
+    catch
+    {
+        if ((Get-HttpStatusCode -Exception $_.Exception) -eq 404)
+        {
+            return $null
+        }
+
+        throw
+    }
+}
+
+function Get-ReleaseAsset
+{
+    param(
+        [Parameter(Mandatory)]$Release,
+        [Parameter(Mandatory)][string]$AssetName
+    )
+
+    return $Release.assets | Where-Object { $_.name -eq $AssetName } | Select-Object -First 1
+}
+
+function Get-WindowsArchitecture
+{
+    $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    switch ($arch)
+    {
+        ([System.Runtime.InteropServices.Architecture]::X64) { return 'x64' }
+        ([System.Runtime.InteropServices.Architecture]::Arm64) { return 'arm64' }
+        default { throw "Unsupported Windows architecture '$arch'. Only x64 and arm64 are supported." }
+    }
+}
+
+function Get-ReleaseForQuality
+{
+    param(
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][string]$SelectedQuality,
+        [Parameter(Mandatory)][string]$AssetName
+    )
+
+    if ($SelectedQuality -eq 'Dev')
+    {
+        $devRelease = Get-ReleaseByTag -Repo $Repo -Tag 'dev'
+        if ($null -eq $devRelease)
+        {
+            $releases = @(Invoke-GitHubApi -Uri "https://api.github.com/repos/$Repo/releases?per_page=100")
+            $devRelease = $releases | Where-Object { $_.name -eq 'Development Build' } | Select-Object -First 1
+        }
+
+        if ($null -eq $devRelease)
+        {
+            throw "Could not locate the standing Development Build release (tag 'dev' or title 'Development Build')."
+        }
+
+        $devAsset = Get-ReleaseAsset -Release $devRelease -AssetName $AssetName
+        if ($null -eq $devAsset)
+        {
+            throw "Development Build release '$($devRelease.name)' does not contain asset '$AssetName'."
+        }
+
+        return $devRelease
+    }
+
+    $allReleases = @(Invoke-GitHubApi -Uri "https://api.github.com/repos/$Repo/releases?per_page=100")
+    foreach ($release in $allReleases)
+    {
+        if ($release.draft)
+        {
+            continue
+        }
+
+        if ($release.tag_name -in @('dev', 'install-scripts'))
+        {
+            continue
+        }
+
+        if ($SelectedQuality -eq 'Stable' -and $release.prerelease)
+        {
+            continue
+        }
+
+        $asset = Get-ReleaseAsset -Release $release -AssetName $AssetName
+        if ($null -eq $asset)
+        {
+            continue
+        }
+
+        return $release
+    }
+
+    throw "No '$SelectedQuality' release containing '$AssetName' was found in '$Repo'."
+}
+
+function Get-ExpectedSha256
+{
+    param(
+        [Parameter(Mandatory)][string]$ChecksumsPath,
+        [Parameter(Mandatory)][string]$AssetName
+    )
+
+    $line = @(Get-Content -Path $ChecksumsPath | Where-Object { $_ -match "\s\*?$([regex]::Escape($AssetName))$" } | Select-Object -First 1)
+    if ($line.Count -eq 0)
+    {
+        throw "checksums.txt did not contain an entry for '$AssetName'."
+    }
+
+    $match = [regex]::Match($line[0], '^\s*([0-9a-fA-F]{64})\s+\*?.+$')
+    if (-not $match.Success)
+    {
+        throw "Invalid checksum line format for '$AssetName' in checksums.txt."
+    }
+
+    return $match.Groups[1].Value.ToLowerInvariant()
+}
+
+function Assert-CertificateChain
+{
+    param(
+        [Parameter(Mandatory)][System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate,
+        [Parameter(Mandatory)][string]$Description,
+        [switch]$IgnoreTimeValidity
+    )
+
+    $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+    $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::Online
+    $chain.ChainPolicy.RevocationFlag = [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EntireChain
+    $chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::FromSeconds(15)
+    $chain.ChainPolicy.VerificationFlags = if ($IgnoreTimeValidity)
+    {
+        [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreNotTimeValid
+    }
+    else
+    {
+        [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
+    }
+
+    $ok = $chain.Build($Certificate)
+    if ($ok)
+    {
+        return
+    }
+
+    $statuses = @($chain.ChainStatus |
+            Where-Object { $_.Status -ne [System.Security.Cryptography.X509Certificates.X509ChainStatusFlags]::NoError } |
+            ForEach-Object {
+                $statusText = $_.Status.ToString()
+                $infoText = $_.StatusInformation.Trim()
+                if ([string]::IsNullOrWhiteSpace($infoText))
+                {
+                    $statusText
+                }
+                else
+                {
+                    "$statusText ($infoText)"
+                }
+            })
+
+    $statusMessage = if ($statuses.Count -gt 0)
+    {
+        $statuses -join '; '
+    }
+    else
+    {
+        'unknown chain validation failure'
+    }
+
+    throw "$Description certificate chain validation failed: $statusMessage"
+}
+
+function Normalize-DistinguishedNameKey
+{
+    param([Parameter(Mandatory)][string]$Key)
+
+    $normalized = $Key.Trim().ToUpperInvariant()
+    if ($normalized -eq 'ST')
+    {
+        return 'S'
+    }
+
+    return $normalized
+}
+
+function Parse-DistinguishedName
+{
+    param([Parameter(Mandatory)][string]$DistinguishedName)
+
+    $result = @{}
+    foreach ($segment in $DistinguishedName -split ',')
+    {
+        $match = [regex]::Match($segment, '^\s*([^=]+?)\s*=\s*(.+?)\s*$')
+        if (-not $match.Success)
+        {
+            throw "Could not parse distinguished name segment '$segment' from '$DistinguishedName'."
+        }
+
+        $key = Normalize-DistinguishedNameKey -Key $match.Groups[1].Value
+        $value = $match.Groups[2].Value.Trim()
+        if ([string]::IsNullOrWhiteSpace($value))
+        {
+            throw "Distinguished name key '$key' in '$DistinguishedName' has an empty value."
+        }
+
+        if ($result.ContainsKey($key))
+        {
+            throw "Distinguished name '$DistinguishedName' contains duplicate key '$key', which is not supported."
+        }
+
+        $result[$key] = $value
+    }
+
+    return $result
+}
+
+function Assert-WindowsBinaryTrust
+{
+    param(
+        [Parameter(Mandatory)][string]$BinaryPath,
+        [Parameter(Mandatory)][string]$ExpectedSubject
+    )
+
+    $signature = Get-AuthenticodeSignature -FilePath $BinaryPath
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid)
+    {
+        $statusMessage = if ([string]::IsNullOrWhiteSpace($signature.StatusMessage)) { 'No additional details were provided.' } else { $signature.StatusMessage }
+        throw "Authenticode signature validation failed for '$BinaryPath': $($signature.Status) - $statusMessage"
+    }
+
+    if ($null -eq $signature.SignerCertificate)
+    {
+        throw "Authenticode signature on '$BinaryPath' did not include a signer certificate."
+    }
+
+    $actualSubject = $signature.SignerCertificate.Subject
+    $expectedSubjectParts = Parse-DistinguishedName -DistinguishedName $ExpectedSubject
+    $actualSubjectParts = Parse-DistinguishedName -DistinguishedName $actualSubject
+    foreach ($key in $expectedSubjectParts.Keys)
+    {
+        if (-not $actualSubjectParts.ContainsKey($key))
+        {
+            throw "Signer subject '$actualSubject' is missing required field '$key' from expected subject '$ExpectedSubject'."
+        }
+
+        $actualValue = $actualSubjectParts[$key]
+        $expectedValue = $expectedSubjectParts[$key]
+        if (-not [string]::Equals($actualValue, $expectedValue, [System.StringComparison]::OrdinalIgnoreCase))
+        {
+            throw "Signer subject '$actualSubject' has '$key=$actualValue', expected '$key=$expectedValue'."
+        }
+    }
+
+    Assert-CertificateChain -Certificate $signature.SignerCertificate -Description 'Signer' -IgnoreTimeValidity
+
+    if ($null -eq $signature.TimeStamperCertificate)
+    {
+        throw "Expected a timestamped signature for '$BinaryPath', but no timestamp certificate was present."
+    }
+
+    Assert-CertificateChain -Certificate $signature.TimeStamperCertificate -Description 'Timestamp'
+}
+
+function Get-KustoVersionString
+{
+    param([Parameter(Mandatory)][string]$BinaryPath)
+
+    try
+    {
+        $output = & $BinaryPath --version 2>$null
+        if ($LASTEXITCODE -eq 0 -and $output)
+        {
+            $firstLine = @($output | Select-Object -First 1)[0]
+            $match = [regex]::Match($firstLine, '\d+\.\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z\.-]+)?')
+            if ($match.Success)
+            {
+                return $match.Value
+            }
+        }
+    }
+    catch
+    {
+    }
+
+    $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($BinaryPath)
+    $candidate = if (-not [string]::IsNullOrWhiteSpace($versionInfo.ProductVersion))
+    {
+        $versionInfo.ProductVersion
+    }
+    else
+    {
+        $versionInfo.FileVersion
+    }
+
+    if ([string]::IsNullOrWhiteSpace($candidate))
+    {
+        throw "Could not determine version for '$BinaryPath'."
+    }
+
+    $metadataMatch = [regex]::Match($candidate, '\d+\.\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z\.-]+)?')
+    if (-not $metadataMatch.Success)
+    {
+        throw "Version '$candidate' for '$BinaryPath' was not in an expected format."
+    }
+
+    return $metadataMatch.Value
+}
+
+function Parse-SemanticVersion
+{
+    param([Parameter(Mandatory)][string]$Value)
+
+    $match = [regex]::Match($Value, '^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:\.\d+)?(?:-(?<prerelease>[0-9A-Za-z\.-]+))?$')
+    if (-not $match.Success)
+    {
+        throw "Version '$Value' is not a supported semantic version format."
+    }
+
+    return [ordered]@{
+        Major = [int]$match.Groups['major'].Value
+        Minor = [int]$match.Groups['minor'].Value
+        Patch = [int]$match.Groups['patch'].Value
+        PreRelease = $match.Groups['prerelease'].Value
+    }
+}
+
+function Compare-SemanticVersion
+{
+    param(
+        [Parameter(Mandatory)][string]$Left,
+        [Parameter(Mandatory)][string]$Right
+    )
+
+    $leftVersion = Parse-SemanticVersion -Value $Left
+    $rightVersion = Parse-SemanticVersion -Value $Right
+
+    foreach ($part in @('Major', 'Minor', 'Patch'))
+    {
+        if ($leftVersion[$part] -gt $rightVersion[$part])
+        {
+            return 1
+        }
+
+        if ($leftVersion[$part] -lt $rightVersion[$part])
+        {
+            return -1
+        }
+    }
+
+    $leftPre = $leftVersion.PreRelease
+    $rightPre = $rightVersion.PreRelease
+    if ([string]::IsNullOrWhiteSpace($leftPre) -and [string]::IsNullOrWhiteSpace($rightPre))
+    {
+        return 0
+    }
+
+    if ([string]::IsNullOrWhiteSpace($leftPre))
+    {
+        return 1
+    }
+
+    if ([string]::IsNullOrWhiteSpace($rightPre))
+    {
+        return -1
+    }
+
+    $leftIdentifiers = $leftPre.Split('.', [System.StringSplitOptions]::RemoveEmptyEntries)
+    $rightIdentifiers = $rightPre.Split('.', [System.StringSplitOptions]::RemoveEmptyEntries)
+    $maxLength = [Math]::Max($leftIdentifiers.Length, $rightIdentifiers.Length)
+
+    for ($index = 0; $index -lt $maxLength; $index++)
+    {
+        if ($index -ge $leftIdentifiers.Length)
+        {
+            return -1
+        }
+
+        if ($index -ge $rightIdentifiers.Length)
+        {
+            return 1
+        }
+
+        $leftIdentifier = $leftIdentifiers[$index]
+        $rightIdentifier = $rightIdentifiers[$index]
+        $leftIsNumeric = $leftIdentifier -match '^\d+$'
+        $rightIsNumeric = $rightIdentifier -match '^\d+$'
+
+        if ($leftIsNumeric -and $rightIsNumeric)
+        {
+            $leftNumeric = [System.Numerics.BigInteger]::Parse($leftIdentifier)
+            $rightNumeric = [System.Numerics.BigInteger]::Parse($rightIdentifier)
+            if ($leftNumeric -gt $rightNumeric)
+            {
+                return 1
+            }
+
+            if ($leftNumeric -lt $rightNumeric)
+            {
+                return -1
+            }
+
+            continue
+        }
+
+        if ($leftIsNumeric -and -not $rightIsNumeric)
+        {
+            return -1
+        }
+
+        if (-not $leftIsNumeric -and $rightIsNumeric)
+        {
+            return 1
+        }
+
+        $identifierComparison = [string]::CompareOrdinal($leftIdentifier, $rightIdentifier)
+        if ($identifierComparison -gt 0)
+        {
+            return 1
+        }
+
+        if ($identifierComparison -lt 0)
+        {
+            return -1
+        }
+    }
+
+    return 0
+}
+
+$architecture = Get-WindowsArchitecture
+$assetName = "kusto-win-$architecture.zip"
+$release = Get-ReleaseForQuality -Repo $Repository -SelectedQuality $Quality -AssetName $assetName
+$asset = Get-ReleaseAsset -Release $release -AssetName $assetName
+if ($null -eq $asset)
+{
+    throw "Release '$($release.name)' does not contain expected asset '$assetName'."
+}
+
+if ($Quality -eq 'Dev' -and -not $Force)
+{
+    $confirmation = Read-Host "Dev quality disables checksum/signature verification. Type YES to continue"
+    if ($confirmation -cne 'YES')
+    {
+        throw 'Installation canceled by user.'
+    }
+}
+
+$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("kusto-install-" + [guid]::NewGuid().ToString('N'))
+$downloadPath = Join-Path $tempRoot $assetName
+$extractPath = Join-Path $tempRoot 'extract'
+
+try
+{
+    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+    Invoke-GitHubAssetDownload -Uri $asset.browser_download_url -OutFile $downloadPath
+
+    if ($Quality -ne 'Dev')
+    {
+        $checksumsAsset = Get-ReleaseAsset -Release $release -AssetName 'checksums.txt'
+        if ($null -eq $checksumsAsset)
+        {
+            throw "Release '$($release.name)' did not include checksums.txt."
+        }
+
+        $checksumsPath = Join-Path $tempRoot 'checksums.txt'
+        Invoke-GitHubAssetDownload -Uri $checksumsAsset.browser_download_url -OutFile $checksumsPath
+
+        $expectedSha = Get-ExpectedSha256 -ChecksumsPath $checksumsPath -AssetName $assetName
+        $actualSha = (Get-FileHash -Path $downloadPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($expectedSha -ne $actualSha)
+        {
+            throw "SHA256 mismatch for '$assetName'. Expected '$expectedSha' but got '$actualSha'."
+        }
+
+        $releaseMetadataAsset = Get-ReleaseAsset -Release $release -AssetName 'release-metadata.json'
+        if ($null -ne $releaseMetadataAsset)
+        {
+            $metadataPath = Join-Path $tempRoot 'release-metadata.json'
+            Invoke-GitHubAssetDownload -Uri $releaseMetadataAsset.browser_download_url -OutFile $metadataPath
+            $metadata = Get-Content -Path $metadataPath -Raw | ConvertFrom-Json
+            $metadataAsset = $metadata.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+            if ($null -eq $metadataAsset)
+            {
+                throw "release-metadata.json did not contain asset '$assetName'."
+            }
+
+            if ($metadataAsset.sha256.ToLowerInvariant() -ne $expectedSha)
+            {
+                throw "release-metadata.json SHA256 for '$assetName' did not match checksums.txt."
+            }
+        }
+    }
+
+    Expand-Archive -Path $downloadPath -DestinationPath $extractPath -Force
+    $downloadedBinaryPath = Join-Path $extractPath 'kusto.exe'
+    if (-not (Test-Path $downloadedBinaryPath))
+    {
+        throw "Downloaded archive '$assetName' did not contain 'kusto.exe'."
+    }
+
+    if ($Quality -ne 'Dev')
+    {
+        Assert-WindowsBinaryTrust -BinaryPath $downloadedBinaryPath -ExpectedSubject $ExpectedSignerSubject
+    }
+
+    $installDirectory = [System.IO.Path]::GetFullPath($TargetPath)
+    New-Item -ItemType Directory -Path $installDirectory -Force | Out-Null
+
+    $destinationPath = Join-Path $installDirectory 'kusto.exe'
+    $downloadedVersion = Get-KustoVersionString -BinaryPath $downloadedBinaryPath
+
+    $shouldInstall = $true
+    if (Test-Path $destinationPath)
+    {
+        $existingVersion = Get-KustoVersionString -BinaryPath $destinationPath
+        $comparison = Compare-SemanticVersion -Left $downloadedVersion -Right $existingVersion
+        if ($comparison -le 0)
+        {
+            $shouldInstall = $false
+            Write-Host "Existing kusto.exe version '$existingVersion' is newer than or equal to downloaded version '$downloadedVersion'; skipping overwrite."
+        }
+    }
+
+    if ($shouldInstall)
+    {
+        Copy-Item -Path $downloadedBinaryPath -Destination $destinationPath -Force
+        Write-Host "Installed kusto.exe version '$downloadedVersion' to '$installDirectory'."
+    }
+
+    if ($UpdatePath)
+    {
+        $sessionPathUpdated = Ensure-PathContains -Entry $installDirectory -Target Process
+        $userPathUpdated = Ensure-PathContains -Entry $installDirectory -Target User
+
+        if ($sessionPathUpdated)
+        {
+            Write-Host "Added '$installDirectory' to current session PATH."
+        }
+
+        if ($userPathUpdated)
+        {
+            Write-Host "Added '$installDirectory' to user PATH. Open a new terminal to pick up the change."
+        }
+    }
+    else
+    {
+        Write-Host "Skipped PATH updates because -UpdatePath was set to false."
+    }
+}
+finally
+{
+    if (Test-Path $tempRoot)
+    {
+        Remove-Item -Path $tempRoot -Recurse -Force
+    }
+}
