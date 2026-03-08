@@ -1,11 +1,6 @@
 name: Install Scripts
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'scripts/install/install-kusto-cli.ps1'
-      - '.github/workflows/install-scripts.yml'
   workflow_dispatch:
 
 jobs:
