@@ -98,12 +98,14 @@ jobs:
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" &>/dev/null; then
             gh release edit "$RELEASE_TAG" \
               --repo "${{ github.repository }}" \
+              --latest=false \
               --title "$RELEASE_TITLE" \
               --notes "$NOTES" \
               --target "${{ github.sha }}"
           else
             gh release create "$RELEASE_TAG" \
               --repo "${{ github.repository }}" \
+              --latest=false \
               --target "${{ github.sha }}" \
               --title "$RELEASE_TITLE" \
               --notes "$NOTES"
