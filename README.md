@@ -2,6 +2,12 @@
 
 A native command-line tool for Azure Data Explorer (Kusto), focused on quick exploration and query execution from a terminal.
 
+## Install now on Windows
+
+```PowerShell
+irm https://kusto.damianedwards.dev/install.ps1 | iex
+```
+
 ## What this CLI supports
 
 - Manage known clusters (`cluster` command group)
@@ -16,37 +22,6 @@ A native command-line tool for Azure Data Explorer (Kusto), focused on quick exp
 - Optional table schema caching with TTL-based revalidation for repeated `table show` calls
 - Configurable log verbosity with structured console/file logging
 - GitHub Actions workflows for PR validation, versioned native release assets, and release promotion
-
-## Installer script (Windows)
-
-The repository publishes a signed Windows installer script at a stable release URL: `https://kusto.damianedwards.dev/install.ps1`
-
-Example usage:
-
-```powershell
-# Stable (default)
-irm https://kusto.damianedwards.dev/install.ps1 | iex
-
-# Include prereleases
-& ([scriptblock]::Create((irm 'https://kusto.damianedwards.dev/install.ps1'))) -Quality PreRelease
-
-# Development build (unsigned assets): prompts for confirmation unless -Force is supplied
-& ([scriptblock]::Create((irm 'https://kusto.damianedwards.dev/install.ps1'))) -Quality Dev -Force
-
-# Install to a custom location without modifying PATH
-& ([scriptblock]::Create((irm 'https://kusto.damianedwards.dev/install.ps1'))) -TargetPath 'C:\tools\kusto\bin' -UpdatePath:$false
-```
-
-Installer behavior:
-
-- Script path in this repo: `scripts/install/install-kusto-cli.ps1`
-- Supports `-Quality Dev|PreRelease|Stable` (default: `Stable`)
-- Supports `-TargetPath` (default: `%USERPROFILE%\.kusto\bin`)
-- Supports `-UpdatePath` (default: `true`)
-- Replaces existing `kusto.exe` only when the downloaded version is newer
-- Updates current-session and user PATH to include the target directory when `-UpdatePath` is `true`
-- On non-Windows PowerShell, exits with a clear "not yet supported" message
-
 
 ## Authentication
 
@@ -253,6 +228,38 @@ Human and markdown output show a short `Open in Web Explorer` link when availabl
 ```powershell
 kusto query "StormEvents | take 1" --cluster help --database Samples --log-level Information
 ```
+
+## Installer script
+
+The repository publishes a signed Windows installer script at a stable release URL: `https://kusto.damianedwards.dev/install.ps1`
+
+An installer bash script for macOS and Linux is coming soon. In the meantime you can download macOS and Linux native executables from the [releases page](https://github.com/DamianEdwards/kusto-cli/releases).
+
+Example usage:
+
+```powershell
+# Stable (default)
+irm https://kusto.damianedwards.dev/install.ps1 | iex
+
+# Include prereleases
+& ([scriptblock]::Create((irm 'https://kusto.damianedwards.dev/install.ps1'))) -Quality PreRelease
+
+# Development build (unsigned assets): prompts for confirmation unless -Force is supplied
+& ([scriptblock]::Create((irm 'https://kusto.damianedwards.dev/install.ps1'))) -Quality Dev -Force
+
+# Install to a custom location without modifying PATH
+& ([scriptblock]::Create((irm 'https://kusto.damianedwards.dev/install.ps1'))) -TargetPath 'C:\tools\kusto\bin' -UpdatePath:$false
+```
+
+Installer behavior:
+
+- Script path in this repo: `scripts/install/install-kusto-cli.ps1`
+- Supports `-Quality Dev|PreRelease|Stable` (default: `Stable`)
+- Supports `-TargetPath` (default: `%USERPROFILE%\.kusto\bin`)
+- Supports `-UpdatePath` (default: `true`)
+- Replaces existing `kusto.exe` only when the downloaded version is newer
+- Updates current-session and user PATH to include the target directory when `-UpdatePath` is `true`
+- On non-Windows PowerShell, exits with a clear "not yet supported" message
 
 ## Build and test
 
