@@ -119,7 +119,7 @@ function Invoke-GitHubApi
         $headers.Authorization = "Bearer $token"
     }
 
-    return Invoke-RestMethod -Method Get -Uri $Uri -Headers $headers
+    Invoke-RestMethod -Method Get -Uri $Uri -Headers $headers
 }
 
 function Invoke-GitHubAssetDownload
@@ -210,7 +210,7 @@ function Get-ReleaseForQuality
         $devRelease = Get-ReleaseByTag -Repo $Repo -Tag 'dev'
         if ($null -eq $devRelease)
         {
-            $releases = @(Invoke-GitHubApi -Uri "https://api.github.com/repos/$Repo/releases?per_page=100")
+            $releases = @(Invoke-GitHubApi -Uri "https://api.github.com/repos/$Repo/releases?per_page=100" | ForEach-Object { $_ })
             $devRelease = $releases | Where-Object { $_.name -eq 'Development Build' } | Select-Object -First 1
         }
 
@@ -228,7 +228,7 @@ function Get-ReleaseForQuality
         return $devRelease
     }
 
-    $allReleases = @(Invoke-GitHubApi -Uri "https://api.github.com/repos/$Repo/releases?per_page=100")
+    $allReleases = @(Invoke-GitHubApi -Uri "https://api.github.com/repos/$Repo/releases?per_page=100" | ForEach-Object { $_ })
     foreach ($release in $allReleases)
     {
         if ($release.draft)
