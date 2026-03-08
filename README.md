@@ -17,39 +17,24 @@ A native command-line tool for Azure Data Explorer (Kusto), focused on quick exp
 - Configurable log verbosity with structured console/file logging
 - GitHub Actions workflows for PR validation, versioned native release assets, and release promotion
 
-## Authentication
-
-The CLI uses `DefaultAzureCredential`.  
-If your current credential chain cannot authenticate to Kusto, sign in with Azure CLI:
-
-```powershell
-az login
-```
-
-For sovereign clouds, set Azure CLI to the matching cloud before signing in (for example `az cloud set --name AzureUSGovernment` or `az cloud set --name AzureChinaCloud`). The CLI currently auto-selects Kusto token audiences and Web Explorer bases for public, US Government, and China cluster URLs.
-
 ## Installer script (Windows)
 
-The repository publishes a signed Windows installer script at a stable release URL:
-
-```powershell
-https://github.com/DamianEdwards/kusto-cli/releases/download/install-scripts/install.ps1
-```
+The repository publishes a signed Windows installer script at a stable release URL: `https://kusto.damianedwards.dev/install.ps1`
 
 Example usage:
 
 ```powershell
 # Stable (default)
-irm 'https://github.com/DamianEdwards/kusto-cli/releases/download/install-scripts/install.ps1' | iex
+irm https://kusto.damianedwards.dev/install.ps1 | iex
 
 # Include prereleases
-& ([scriptblock]::Create((irm 'https://github.com/DamianEdwards/kusto-cli/releases/download/install-scripts/install.ps1'))) -Quality PreRelease
+& ([scriptblock]::Create((irm 'https://kusto.damianedwards.dev/install.ps1'))) -Quality PreRelease
 
 # Development build (unsigned assets): prompts for confirmation unless -Force is supplied
-& ([scriptblock]::Create((irm 'https://github.com/DamianEdwards/kusto-cli/releases/download/install-scripts/install.ps1'))) -Quality Dev -Force
+& ([scriptblock]::Create((irm 'https://kusto.damianedwards.dev/install.ps1'))) -Quality Dev -Force
 
 # Install to a custom location without modifying PATH
-& ([scriptblock]::Create((irm 'https://github.com/DamianEdwards/kusto-cli/releases/download/install-scripts/install.ps1'))) -TargetPath 'C:\tools\kusto\bin' -UpdatePath:$false
+& ([scriptblock]::Create((irm 'https://kusto.damianedwards.dev/install.ps1'))) -TargetPath 'C:\tools\kusto\bin' -UpdatePath:$false
 ```
 
 Installer behavior:
@@ -61,6 +46,18 @@ Installer behavior:
 - Replaces existing `kusto.exe` only when the downloaded version is newer
 - Updates current-session and user PATH to include the target directory when `-UpdatePath` is `true`
 - On non-Windows PowerShell, exits with a clear "not yet supported" message
+
+
+## Authentication
+
+The CLI uses `DefaultAzureCredential`.  
+If your current credential chain cannot authenticate to Kusto, sign in with Azure CLI:
+
+```powershell
+az login
+```
+
+For sovereign clouds, set Azure CLI to the matching cloud before signing in (for example `az cloud set --name AzureUSGovernment` or `az cloud set --name AzureChinaCloud`). The CLI currently auto-selects Kusto token audiences and Web Explorer bases for public, US Government, and China cluster URLs.
 
 ## Quick start
 
