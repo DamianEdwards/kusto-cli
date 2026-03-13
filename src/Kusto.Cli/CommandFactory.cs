@@ -539,6 +539,7 @@ public static class CommandFactory
                     Console.IsInputRedirected,
                     Console.In,
                     ct);
+                QueryValidator.Validate(query);
 
                 var result = await runtime.KustoService.ExecuteQueryAsync(
                     resolvedCluster.Url,
