@@ -536,6 +536,7 @@ public static class CommandFactory
                     Table = result.Table,
                     WebExplorerUrl = result.WebExplorerUrl,
                     Statistics = result.Statistics,
+                    Visualization = result.Visualization,
                     IsQueryResultTable = true
                 };
             }, cancellationToken);

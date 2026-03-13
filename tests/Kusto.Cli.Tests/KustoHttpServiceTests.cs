@@ -101,6 +101,86 @@ public sealed class KustoHttpServiceTests
             "https://dataexplorer.azure.com/clusters/help.kusto.windows.net/databases/Samples?query=",
             result.WebExplorerUrl);
         Assert.Null(result.Statistics);
+        Assert.Null(result.Visualization);
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_ExtractsVisualizationMetadataFromExtendedProperties()
+    {
+        var responseJson = JsonSerializer.Serialize(
+            new object[]
+            {
+                new
+                {
+                    FrameType = "DataTable",
+                    TableName = "PrimaryResult",
+                    TableKind = "PrimaryResult",
+                    Columns = new object[]
+                    {
+                        new { ColumnName = "State", ColumnType = "string" },
+                        new { ColumnName = "Count", ColumnType = "long" }
+                    },
+                    Rows = new object?[][]
+                    {
+                        ["TEXAS", 4701]
+                    }
+                },
+                new
+                {
+                    FrameType = "DataTable",
+                    TableName = "@ExtendedProperties",
+                    TableKind = "QueryProperties",
+                    Columns = new object[]
+                    {
+                        new { ColumnName = "TableId", ColumnType = "int" },
+                        new { ColumnName = "Key", ColumnType = "string" },
+                        new { ColumnName = "Value", ColumnType = "dynamic" }
+                    },
+                    Rows = new object?[][]
+                    {
+                        [
+                            0,
+                            "Visualization",
+                            new Dictionary<string, object?>
+                            {
+                                ["Visualization"] = "piechart",
+                                ["Title"] = "Top states",
+                                ["XColumn"] = "State",
+                                ["YColumns"] = "Count",
+                                ["Legend"] = "hidden",
+                                ["YMin"] = "NaN",
+                                ["YMax"] = "NaN",
+                                ["CustomProperty"] = "custom-value"
+                            }
+                        ]
+                    }
+                }
+            });
+
+        var handler = new RecordingHandler(() => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson)
+        });
+        using var httpClient = new HttpClient(handler);
+        var service = new KustoHttpService(httpClient, new StaticTokenProvider("fake-token"), NullLogger<KustoHttpService>.Instance);
+
+        var result = await service.ExecuteQueryAsync(
+            "https://help.kusto.windows.net",
+            "Samples",
+            "StormEvents | summarize Count=count() by State | render piechart",
+            includeStatistics: false,
+            CancellationToken.None);
+
+        Assert.NotNull(result.Visualization);
+        Assert.Equal("piechart", result.Visualization!.Visualization);
+        Assert.Equal("Top states", result.Visualization.Title);
+        Assert.Equal("State", result.Visualization.XColumn);
+        Assert.Equal(["Count"], result.Visualization.YColumns);
+        Assert.Equal("hidden", result.Visualization.Legend);
+        Assert.Null(result.Visualization.YMin);
+        Assert.Null(result.Visualization.YMax);
+        Assert.Equal("custom-value", result.Visualization.AdditionalProperties?["CustomProperty"]);
+        Assert.Contains("\"Visualization\":\"piechart\"", result.Visualization.Raw, StringComparison.Ordinal);
     }
 
     [Fact]

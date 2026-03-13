@@ -78,11 +78,22 @@ public sealed class OutputFormatter : IOutputFormatter
             wroteSection = true;
         }
 
-        if (!string.IsNullOrWhiteSpace(output.WebExplorerUrl))
+        if (output.Visualization is not null)
         {
             if (wroteSection)
             {
                 console.WriteLine();
+            }
+
+            WriteVisualizationSection(console, output.Visualization);
+            wroteSection = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(output.WebExplorerUrl))
+        {
+            if (wroteSection)
+            {
+                console.MarkupLine(string.Empty);
             }
 
             WriteWebExplorerLink(console, output.WebExplorerUrl, useAnsi);
@@ -134,6 +145,16 @@ public sealed class OutputFormatter : IOutputFormatter
             }
         }
 
+        if (output.Visualization is not null)
+        {
+            if (buffer.Length > 0)
+            {
+                buffer.AppendLine();
+            }
+
+            AppendVisualizationSection(buffer, output.Visualization);
+        }
+
         if (!string.IsNullOrWhiteSpace(output.WebExplorerUrl))
         {
             if (buffer.Length > 0)
@@ -168,6 +189,32 @@ public sealed class OutputFormatter : IOutputFormatter
         return output.Properties is null
             ? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, string?>(output.Properties, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<string, string?> BuildVisualizationProperties(QueryVisualization visualization)
+    {
+        var properties = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+        AddStatistic(properties, "Title", visualization.Title);
+        AddStatistic(properties, "XColumn", visualization.XColumn);
+        AddStatistic(properties, "YColumns", Join(visualization.YColumns));
+        AddStatistic(properties, "Series", Join(visualization.Series));
+        AddStatistic(properties, "XTitle", visualization.XTitle);
+        AddStatistic(properties, "YTitle", visualization.YTitle);
+        AddStatistic(properties, "Kind", visualization.Kind);
+        AddStatistic(properties, "Legend", visualization.Legend);
+        AddStatistic(properties, "YMin", FormatNumber(visualization.YMin));
+        AddStatistic(properties, "YMax", FormatNumber(visualization.YMax));
+
+        if (visualization.AdditionalProperties is not null)
+        {
+            foreach (var pair in visualization.AdditionalProperties.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                AddStatistic(properties, $"Additional.{pair.Key}", pair.Value);
+            }
+        }
+
+        return properties;
     }
 
     private static Dictionary<string, string?> FlattenStatistics(QueryStatistics statistics)
@@ -247,6 +294,37 @@ public sealed class OutputFormatter : IOutputFormatter
         }
     }
 
+    private static void WriteVisualizationSection(IAnsiConsole console, QueryVisualization visualization)
+    {
+        var name = visualization.Visualization ?? "visualization";
+        console.MarkupLine($"Render requested: {Markup.Escape(name)}");
+
+        var properties = BuildVisualizationProperties(visualization);
+        foreach (var pair in properties.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            console.MarkupLine($"  [grey]{Markup.Escape(pair.Key)}:[/] {Markup.Escape(pair.Value ?? string.Empty)}");
+        }
+
+        console.Markup("Local image generation is not yet implemented; open in Web Explorer to view the chart. ");
+    }
+
+    private static void AppendVisualizationSection(StringBuilder buffer, QueryVisualization visualization)
+    {
+        buffer.AppendLine("### Render");
+        buffer.AppendLine();
+        buffer.AppendLine($"Render requested: {visualization.Visualization ?? "visualization"}");
+        buffer.AppendLine();
+
+        var properties = BuildVisualizationProperties(visualization);
+        if (properties.Count > 0)
+        {
+            AppendPropertiesTable(buffer, properties);
+            buffer.AppendLine();
+        }
+
+        buffer.AppendLine("Local image generation is not yet implemented; open in Web Explorer to view the chart.");
+    }
+
     private static string? FormatNumber(double? value)
     {
         return value?.ToString("0.##", CultureInfo.InvariantCulture);
@@ -260,6 +338,13 @@ public sealed class OutputFormatter : IOutputFormatter
     private static string EscapeMarkdown(string value)
     {
         return value.Replace("|", "\\|", StringComparison.Ordinal);
+    }
+
+    private static string? Join(IReadOnlyList<string>? values)
+    {
+        return values is { Count: > 0 }
+            ? string.Join(", ", values)
+            : null;
     }
 
     private static void WriteWebExplorerLink(IAnsiConsole console, string url, bool useAnsi)

@@ -24,6 +24,7 @@ namespace Kusto.Cli;
 [JsonSerializable(typeof(List<KustoResponseColumn>))]
 [JsonSerializable(typeof(List<List<JsonElement>>))]
 [JsonSerializable(typeof(QueryStatistics))]
+[JsonSerializable(typeof(QueryVisualization))]
 [JsonSerializable(typeof(QueryCpuStatistics))]
 [JsonSerializable(typeof(QueryCacheStatistics))]
 [JsonSerializable(typeof(QueryNetworkStatistics))]

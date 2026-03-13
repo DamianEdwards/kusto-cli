@@ -16,6 +16,7 @@ irm https://kusto.damianedwards.dev/install.ps1 | iex
 - Run KQL from inline text, files, or stdin (`query`)
 - Show copy/paste-ready examples and aliases (`examples`)
 - Include Azure Data Explorer Web Explorer deeplinks in query results
+- Surface Kusto `render` metadata in query results when visualization annotations are returned
 - Show optional query execution statistics with `--show-stats`
 - Basic public, US Government, and China cloud support for token audience selection and Web Explorer links
 - Multiple output formats (`human`, `json`, `markdown`/`md`)

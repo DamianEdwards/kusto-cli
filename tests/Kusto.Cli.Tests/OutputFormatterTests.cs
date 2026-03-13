@@ -127,6 +127,65 @@ public sealed class OutputFormatterTests
     }
 
     [Fact]
+    public void FormatHuman_QueryOutput_WithVisualization_ShowsRenderSummary()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(["State", "Count"], [["TEXAS", "4701"]]),
+            WebExplorerUrl = "https://dataexplorer.azure.com/clusters/help.kusto.windows.net/databases/Samples?query=abc",
+            Visualization = new QueryVisualization
+            {
+                Visualization = "piechart",
+                Title = "Top states",
+                XColumn = "State",
+                YColumns = ["Count"],
+                AdditionalProperties = new Dictionary<string, string?>
+                {
+                    ["CustomProperty"] = "custom-value"
+                },
+                Raw = "{\"Visualization\":\"piechart\"}"
+            }
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Human);
+
+        Assert.Contains("Render requested: piechart", rendered, StringComparison.Ordinal);
+        Assert.Contains("Title", rendered, StringComparison.Ordinal);
+        Assert.Contains("Top states", rendered, StringComparison.Ordinal);
+        Assert.Contains("Additional.CustomProperty", rendered, StringComparison.Ordinal);
+        Assert.Contains("Local image generation is not yet implemented", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("{\"Visualization\":\"piechart\"}", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatJson_QueryOutput_WithVisualization_IncludesStructuredMetadata()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(["State"], [["TEXAS"]]),
+            Visualization = new QueryVisualization
+            {
+                Visualization = "piechart",
+                Title = "Top states",
+                XColumn = "State",
+                YColumns = ["Count"],
+                Raw = "{\"Visualization\":\"piechart\"}"
+            }
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Json);
+
+        using var document = JsonDocument.Parse(rendered);
+        Assert.Equal("piechart", document.RootElement.GetProperty("visualization").GetProperty("visualization").GetString());
+        Assert.Equal("Top states", document.RootElement.GetProperty("visualization").GetProperty("title").GetString());
+        Assert.Equal("State", document.RootElement.GetProperty("visualization").GetProperty("xColumn").GetString());
+        Assert.Equal("Count", document.RootElement.GetProperty("visualization").GetProperty("yColumns")[0].GetString());
+        Assert.Equal("{\"Visualization\":\"piechart\"}", document.RootElement.GetProperty("visualization").GetProperty("raw").GetString());
+    }
+
+    [Fact]
     public void FormatMarkdown_QueryOutput_HidesWebExplorerUrlByDefault()
     {
         var formatter = new OutputFormatter();
@@ -146,5 +205,28 @@ public sealed class OutputFormatterTests
         Assert.Contains("ExecutionTimeSec", rendered, StringComparison.Ordinal);
         Assert.Contains("[Open in Web Explorer](", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("WebExplorerUrl", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatMarkdown_QueryOutput_WithVisualization_ShowsRenderSection()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(["State", "Count"], [["TEXAS", "4701"]]),
+            Visualization = new QueryVisualization
+            {
+                Visualization = "piechart",
+                Title = "Top states",
+                YColumns = ["Count"]
+            }
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Markdown);
+
+        Assert.Contains("### Render", rendered, StringComparison.Ordinal);
+        Assert.Contains("Render requested: piechart", rendered, StringComparison.Ordinal);
+        Assert.Contains("| Title | Top states |", rendered, StringComparison.Ordinal);
+        Assert.Contains("Local image generation is not yet implemented", rendered, StringComparison.Ordinal);
     }
 }
