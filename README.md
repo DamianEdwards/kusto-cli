@@ -17,6 +17,7 @@ irm https://kusto.damianedwards.dev/install.ps1 | iex
 - Show copy/paste-ready examples and aliases (`examples`)
 - Include Azure Data Explorer Web Explorer deeplinks in query results
 - Surface Kusto `render` metadata in query results when visualization annotations are returned
+- Render compatible `render` results as terminal charts with `--chart`, or as Mermaid in markdown output
 - Show optional query execution statistics with `--show-stats`
 - Basic public, US Government, and China cloud support for token audience selection and Web Explorer links
 - Multiple output formats (`human`, `json`, `markdown`/`md`)
@@ -50,6 +51,12 @@ kusto database set-default Samples --cluster help
 # 3) Run a query
 kusto query "StormEvents | take 5"
 
+# Render a compatible chart directly in the terminal
+kusto query --chart "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart"
+
+# Emit Mermaid markdown for a compatible render query
+kusto query --format markdown --chart "StormEvents | summarize Count=count() by State | top 5 by Count desc | render piechart"
+
 # Need copy/paste examples?
 kusto examples
 ```
@@ -66,6 +73,16 @@ Example (PowerShell):
 ```powershell
 $env:KUSTO_CONFIG_PATH = "C:\temp\kusto\config.json"
 ```
+
+## Chart rendering
+
+`query --chart` is output-format aware:
+
+- `human`: renders compatible chart types directly in the terminal after the tabular results
+- `markdown`: emits Mermaid chart syntax for compatible chart kinds after the markdown table
+- `json`: rejected, because terminal/markdown chart rendering doesn't apply to JSON output
+
+If a query returns visualization metadata but `--chart` is omitted, the CLI will hint when the result is compatible with terminal chart rendering. If a render kind or layout can't be mapped faithfully to Hex1b or Mermaid, the CLI will keep the table output and show an explanatory message instead.
 
 ## Schema cache
 

@@ -85,7 +85,18 @@ public sealed class OutputFormatter : IOutputFormatter
                 console.WriteLine();
             }
 
-            WriteVisualizationSection(console, output.Visualization);
+            WriteVisualizationSection(console, output.Visualization, output.ChartHint, output.ChartMessage);
+            wroteSection = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(output.HumanChart))
+        {
+            if (wroteSection)
+            {
+                console.WriteLine();
+            }
+
+            console.Write(new Text(output.HumanChart));
             wroteSection = true;
         }
 
@@ -93,7 +104,7 @@ public sealed class OutputFormatter : IOutputFormatter
         {
             if (wroteSection)
             {
-                console.MarkupLine(string.Empty);
+                console.WriteLine();
             }
 
             WriteWebExplorerLink(console, output.WebExplorerUrl, useAnsi);
@@ -152,7 +163,17 @@ public sealed class OutputFormatter : IOutputFormatter
                 buffer.AppendLine();
             }
 
-            AppendVisualizationSection(buffer, output.Visualization);
+            AppendVisualizationSection(buffer, output.Visualization, output.ChartHint, output.ChartMessage);
+        }
+
+        if (!string.IsNullOrWhiteSpace(output.MarkdownChart))
+        {
+            if (buffer.Length > 0)
+            {
+                buffer.AppendLine();
+            }
+
+            buffer.AppendLine(output.MarkdownChart);
         }
 
         if (!string.IsNullOrWhiteSpace(output.WebExplorerUrl))
@@ -294,7 +315,7 @@ public sealed class OutputFormatter : IOutputFormatter
         }
     }
 
-    private static void WriteVisualizationSection(IAnsiConsole console, QueryVisualization visualization)
+    private static void WriteVisualizationSection(IAnsiConsole console, QueryVisualization visualization, string? chartHint, string? chartMessage)
     {
         var name = visualization.Visualization ?? "visualization";
         console.MarkupLine($"Render requested: {Markup.Escape(name)}");
@@ -305,10 +326,18 @@ public sealed class OutputFormatter : IOutputFormatter
             console.MarkupLine($"  [grey]{Markup.Escape(pair.Key)}:[/] {Markup.Escape(pair.Value ?? string.Empty)}");
         }
 
-        console.Markup("Local image generation is not yet implemented; open in Web Explorer to view the chart. ");
+        if (!string.IsNullOrWhiteSpace(chartHint))
+        {
+            console.MarkupLine(Markup.Escape(chartHint));
+        }
+
+        if (!string.IsNullOrWhiteSpace(chartMessage))
+        {
+            console.MarkupLine(Markup.Escape(chartMessage));
+        }
     }
 
-    private static void AppendVisualizationSection(StringBuilder buffer, QueryVisualization visualization)
+    private static void AppendVisualizationSection(StringBuilder buffer, QueryVisualization visualization, string? chartHint, string? chartMessage)
     {
         buffer.AppendLine("### Render");
         buffer.AppendLine();
@@ -322,7 +351,16 @@ public sealed class OutputFormatter : IOutputFormatter
             buffer.AppendLine();
         }
 
-        buffer.AppendLine("Local image generation is not yet implemented; open in Web Explorer to view the chart.");
+        if (!string.IsNullOrWhiteSpace(chartHint))
+        {
+            buffer.AppendLine(chartHint);
+            buffer.AppendLine();
+        }
+
+        if (!string.IsNullOrWhiteSpace(chartMessage))
+        {
+            buffer.AppendLine(chartMessage);
+        }
     }
 
     private static string? FormatNumber(double? value)

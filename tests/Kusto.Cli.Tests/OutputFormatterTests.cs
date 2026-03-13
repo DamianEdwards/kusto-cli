@@ -145,7 +145,8 @@ public sealed class OutputFormatterTests
                     ["CustomProperty"] = "custom-value"
                 },
                 Raw = "{\"Visualization\":\"piechart\"}"
-            }
+            },
+            ChartHint = "This query can be rendered as a terminal chart. Re-run with --chart to see it."
         };
 
         var rendered = formatter.Format(output, OutputFormat.Human);
@@ -154,8 +155,29 @@ public sealed class OutputFormatterTests
         Assert.Contains("Title", rendered, StringComparison.Ordinal);
         Assert.Contains("Top states", rendered, StringComparison.Ordinal);
         Assert.Contains("Additional.CustomProperty", rendered, StringComparison.Ordinal);
-        Assert.Contains("Local image generation is not yet implemented", rendered, StringComparison.Ordinal);
+        Assert.Contains("Re-run with --chart to see it", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("see it.Open in Web Explorer", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("{\"Visualization\":\"piechart\"}", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatHuman_QueryOutput_WithHumanChart_AppendsRenderedChart()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(["State", "Count"], [["TEXAS", "4701"]]),
+            Visualization = new QueryVisualization
+            {
+                Visualization = "columnchart"
+            },
+            HumanChart = "Top states\nTEXAS 4701"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Human);
+
+        Assert.Contains("Top states", rendered, StringComparison.Ordinal);
+        Assert.Contains("TEXAS 4701", rendered, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -219,7 +241,8 @@ public sealed class OutputFormatterTests
                 Visualization = "piechart",
                 Title = "Top states",
                 YColumns = ["Count"]
-            }
+            },
+            ChartMessage = "The 'piechart' render kind is not supported for terminal chart rendering."
         };
 
         var rendered = formatter.Format(output, OutputFormat.Markdown);
@@ -227,6 +250,27 @@ public sealed class OutputFormatterTests
         Assert.Contains("### Render", rendered, StringComparison.Ordinal);
         Assert.Contains("Render requested: piechart", rendered, StringComparison.Ordinal);
         Assert.Contains("| Title | Top states |", rendered, StringComparison.Ordinal);
-        Assert.Contains("Local image generation is not yet implemented", rendered, StringComparison.Ordinal);
+        Assert.Contains("not supported for terminal chart rendering", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatMarkdown_QueryOutput_WithMermaidChart_AppendsMermaidBlock()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(["State", "Count"], [["TEXAS", "4701"]]),
+            Visualization = new QueryVisualization
+            {
+                Visualization = "piechart",
+                Title = "Top states"
+            },
+            MarkdownChart = "```mermaid\npie showData\n```"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Markdown);
+
+        Assert.Contains("```mermaid", rendered, StringComparison.Ordinal);
+        Assert.Contains("pie showData", rendered, StringComparison.Ordinal);
     }
 }

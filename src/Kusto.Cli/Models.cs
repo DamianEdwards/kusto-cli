@@ -15,6 +15,14 @@ public sealed class CliOutput
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public QueryVisualization? Visualization { get; init; }
     [JsonIgnore]
+    public string? ChartHint { get; init; }
+    [JsonIgnore]
+    public string? ChartMessage { get; init; }
+    [JsonIgnore]
+    public string? HumanChart { get; init; }
+    [JsonIgnore]
+    public string? MarkdownChart { get; init; }
+    [JsonIgnore]
     public bool IsQueryResultTable { get; init; }
 }
 
@@ -242,4 +250,46 @@ internal sealed class DatabaseSchemaCacheEntry
     public DateTimeOffset CachedAtUtc { get; set; }
     public string? SchemaVersion { get; set; }
     public string SchemaJson { get; set; } = string.Empty;
+}
+
+internal enum QueryChartKind
+{
+    Column,
+    Bar,
+    Line,
+    Pie
+}
+
+internal enum QueryChartLayout
+{
+    Simple,
+    Grouped,
+    Stacked,
+    Stacked100
+}
+
+internal sealed class QueryChartSeries(string name, IReadOnlyList<double> values)
+{
+    public string Name { get; } = name;
+    public IReadOnlyList<double> Values { get; } = values;
+}
+
+internal sealed class QueryChartDefinition
+{
+    public QueryChartKind Kind { get; init; }
+    public QueryChartLayout Layout { get; init; } = QueryChartLayout.Simple;
+    public bool Horizontal { get; init; }
+    public string? Title { get; init; }
+    public string? XTitle { get; init; }
+    public string? YTitle { get; init; }
+    public IReadOnlyList<string> Categories { get; init; } = [];
+    public IReadOnlyList<QueryChartSeries> Series { get; init; } = [];
+}
+
+internal sealed class QueryChartCompatibility
+{
+    public QueryChartDefinition? HumanChart { get; init; }
+    public string? HumanReason { get; init; }
+    public QueryChartDefinition? MarkdownChart { get; init; }
+    public string? MarkdownReason { get; init; }
 }

@@ -103,6 +103,14 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_Query_AcceptsChart()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["query", "print 1", "--chart"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
     public void Parse_ClusterAdd_AcceptsUseFlag()
     {
         var rootCommand = CommandFactory.CreateRootCommand();
