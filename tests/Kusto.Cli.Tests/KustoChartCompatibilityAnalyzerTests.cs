@@ -77,4 +77,76 @@ public sealed class KustoChartCompatibilityAnalyzerTests
         Assert.Null(result.MarkdownChart);
         Assert.Contains("can't be represented faithfully", result.MarkdownReason, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Analyze_GroupedChartWithMissingSeriesPoint_IsRejected()
+    {
+        var table = new TabularData(
+            ["Month", "Series", "Value"],
+            [
+                ["Jan", "A", "1"],
+                ["Feb", "A", "2"],
+                ["Jan", "B", "3"]
+            ]);
+        var visualization = new QueryVisualization
+        {
+            Visualization = "linechart",
+            XColumn = "Month",
+            Series = ["Series"],
+            YColumns = ["Value"]
+        };
+
+        var result = KustoChartCompatibilityAnalyzer.Analyze(table, visualization);
+
+        Assert.Null(result.HumanChart);
+        Assert.Null(result.MarkdownChart);
+        Assert.Contains("missing X/series combinations", result.HumanReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Analyze_StackedLineChart_PreservesHumanLayout()
+    {
+        var table = new TabularData(
+            ["Month", "Revenue", "Expenses"],
+            [
+                ["Jan", "10", "8"],
+                ["Feb", "11", "7"]
+            ]);
+        var visualization = new QueryVisualization
+        {
+            Visualization = "linechart",
+            XColumn = "Month",
+            YColumns = ["Revenue", "Expenses"],
+            Kind = "stacked"
+        };
+
+        var result = KustoChartCompatibilityAnalyzer.Analyze(table, visualization);
+
+        Assert.NotNull(result.HumanChart);
+        Assert.Equal(QueryChartLayout.Stacked, result.HumanChart!.Layout);
+        Assert.Null(result.MarkdownChart);
+    }
+
+    [Fact]
+    public void Analyze_GroupedChart_WithCaseDistinctSeriesValues_KeepsSeriesSeparate()
+    {
+        var table = new TabularData(
+            ["Category", "Series", "Value"],
+            [
+                ["A", "X", "1"],
+                ["A", "x", "2"]
+            ]);
+        var visualization = new QueryVisualization
+        {
+            Visualization = "columnchart",
+            XColumn = "Category",
+            Series = ["Series"],
+            YColumns = ["Value"]
+        };
+
+        var result = KustoChartCompatibilityAnalyzer.Analyze(table, visualization);
+
+        Assert.NotNull(result.HumanChart);
+        Assert.Equal(["X", "x"], result.HumanChart!.Series.Select(series => series.Name).ToArray());
+    }
 }

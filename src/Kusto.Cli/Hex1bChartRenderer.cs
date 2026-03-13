@@ -1,4 +1,5 @@
 using System.Text;
+using System.Diagnostics;
 using Hex1b;
 using Hex1b.Automation;
 using Hex1b.Charts;
@@ -10,6 +11,8 @@ internal static class Hex1bChartRenderer
 {
     private const int ChartWidth = 100;
     private const int ChartHeight = 24;
+    private static readonly TimeSpan RenderTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan RenderPollInterval = TimeSpan.FromMilliseconds(50);
 
     public static async Task<string> RenderAsync(QueryChartDefinition chart, CancellationToken cancellationToken)
     {
@@ -25,21 +28,59 @@ internal static class Hex1bChartRenderer
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var runTask = terminal.RunAsync(cts.Token);
-
-        await Task.Delay(150, cancellationToken);
-        using var snapshot = terminal.CreateSnapshot();
-        var screenText = Normalize(snapshot.GetScreenText());
-
-        cts.Cancel();
         try
         {
-            await runTask;
+            return await WaitForRenderedScreenAsync(terminal, chart, runTask, cancellationToken);
         }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        finally
         {
+            cts.Cancel();
+            try
+            {
+                await runTask;
+            }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            {
+            }
+        }
+    }
+
+    private static async Task<string> WaitForRenderedScreenAsync(
+        Hex1bTerminal terminal,
+        QueryChartDefinition chart,
+        Task runTask,
+        CancellationToken cancellationToken)
+    {
+        var expectedTitle = chart.Title ?? "Chart";
+        string? lastRenderedScreen = null;
+        var stopwatch = Stopwatch.StartNew();
+
+        while (stopwatch.Elapsed < RenderTimeout)
+        {
+            if (runTask.IsFaulted)
+            {
+                await runTask;
+            }
+
+            using var snapshot = terminal.CreateSnapshot();
+            var screenText = Normalize(snapshot.GetScreenText());
+            if (!string.IsNullOrWhiteSpace(screenText) &&
+                screenText.Contains(expectedTitle, StringComparison.Ordinal) &&
+                string.Equals(screenText, lastRenderedScreen, StringComparison.Ordinal))
+            {
+                return screenText;
+            }
+
+            lastRenderedScreen = screenText;
+            await Task.Delay(RenderPollInterval, cancellationToken);
         }
 
-        return screenText;
+        if (!string.IsNullOrWhiteSpace(lastRenderedScreen))
+        {
+            return lastRenderedScreen;
+        }
+
+        throw new InvalidOperationException("Timed out waiting for Hex1b to render the chart.");
     }
 
     private static Hex1bWidget BuildWidget(RootContext ctx, QueryChartDefinition chart)

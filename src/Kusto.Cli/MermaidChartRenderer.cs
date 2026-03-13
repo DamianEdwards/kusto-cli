@@ -50,6 +50,14 @@ internal static class MermaidChartRenderer
 
     private static string Quote(string value)
     {
-        return $"\"{value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
+        var sanitized = string.Create(value.Length, value, static (buffer, source) =>
+        {
+            for (var i = 0; i < source.Length; i++)
+            {
+                buffer[i] = char.IsControl(source[i]) ? ' ' : source[i];
+            }
+        });
+
+        return $"\"{sanitized.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
     }
 }

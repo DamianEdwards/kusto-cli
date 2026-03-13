@@ -191,23 +191,29 @@ internal static class KustoChartCompatibilityAnalyzer
 
     private static QueryChartLayout? ResolveHumanLayout(QueryVisualization visualization, QueryChartKind kind)
     {
-        if (kind == QueryChartKind.Line)
-        {
-            return QueryChartLayout.Simple;
-        }
-
         if (string.IsNullOrWhiteSpace(visualization.Kind))
         {
             return QueryChartLayout.Simple;
         }
 
-        return visualization.Kind.Trim().ToLowerInvariant() switch
+        var layout = visualization.Kind.Trim().ToLowerInvariant();
+        return kind switch
         {
-            "default" or "unstacked" => QueryChartLayout.Simple,
-            "grouped" => QueryChartLayout.Grouped,
-            "stacked" => QueryChartLayout.Stacked,
-            "stacked100" => QueryChartLayout.Stacked100,
-            _ => null
+            QueryChartKind.Line => layout switch
+            {
+                "default" or "unstacked" => QueryChartLayout.Simple,
+                "stacked" => QueryChartLayout.Stacked,
+                "stacked100" => QueryChartLayout.Stacked100,
+                _ => null
+            },
+            _ => layout switch
+            {
+                "default" or "unstacked" => QueryChartLayout.Simple,
+                "grouped" => QueryChartLayout.Grouped,
+                "stacked" => QueryChartLayout.Stacked,
+                "stacked100" => QueryChartLayout.Stacked100,
+                _ => null
+            }
         };
     }
 
@@ -247,9 +253,9 @@ internal static class KustoChartCompatibilityAnalyzer
         string yColumn)
     {
         var categories = new List<string>();
-        var categoryIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var seenPairs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var seriesMap = new Dictionary<string, Dictionary<int, double>>(StringComparer.OrdinalIgnoreCase);
+        var categoryIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+        var seenPairs = new HashSet<(string SeriesName, int CategoryIndex)>();
+        var seriesMap = new Dictionary<string, Dictionary<int, double>>(StringComparer.Ordinal);
 
         for (var rowIndex = 0; rowIndex < table.Rows.Count; rowIndex++)
         {
@@ -267,8 +273,7 @@ internal static class KustoChartCompatibilityAnalyzer
                 return (null, null, $"Column '{yColumn}' contains a non-numeric or empty value that can't be charted.");
             }
 
-            var pairKey = $"{seriesName}\u001f{index}";
-            if (!seenPairs.Add(pairKey))
+            if (!seenPairs.Add((seriesName, index)))
             {
                 return (null, null, "The result contains duplicate X/series combinations that can't be charted deterministically.");
             }
@@ -283,12 +288,17 @@ internal static class KustoChartCompatibilityAnalyzer
         }
 
         var series = new List<QueryChartSeries>(seriesMap.Count);
-        foreach (var pair in seriesMap.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        foreach (var pair in seriesMap.OrderBy(pair => pair.Key, StringComparer.Ordinal))
         {
+            if (pair.Value.Count != categories.Count)
+            {
+                return (null, null, "The result contains missing X/series combinations that can't be charted faithfully.");
+            }
+
             var values = new double[categories.Count];
             for (var i = 0; i < values.Length; i++)
             {
-                values[i] = pair.Value.TryGetValue(i, out var value) ? value : 0d;
+                values[i] = pair.Value[i];
             }
 
             series.Add(new QueryChartSeries(pair.Key, values));
