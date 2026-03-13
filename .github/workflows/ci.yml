@@ -98,6 +98,8 @@ jobs:
         uses: ./.github/actions/build
         with:
           version: ${{ needs.version.outputs.version }}
+          validate-native-aot: 'true'
+          aot-runtime-identifier: linux-x64
 
       - name: Test
         run: dotnet test kusto.slnx --configuration Release --no-build --nologo --tl:off --logger "trx;LogFileName=test-results.trx" --logger "html;LogFileName=test-results.html" --results-directory ./test-results
