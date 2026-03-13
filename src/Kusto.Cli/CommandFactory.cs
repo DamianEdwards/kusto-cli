@@ -53,6 +53,8 @@ public static class CommandFactory
                             ["Browse", "kusto table list --cluster help --database Samples --filter \"^Storm\" --take 10"],
                             ["Browse", "kusto table show StormEvents --cluster help --database Samples"],
                             ["Run KQL", "kusto query \"StormEvents | take 5\" --cluster help --database Samples"],
+                            ["Run KQL", "kusto query --chart \"StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart\" --cluster help --database Samples"],
+                            ["Run KQL", "kusto query --format markdown --chart \"StormEvents | summarize Count=count() by State | top 5 by Count desc | render piechart\" --cluster help --database Samples"],
                             ["Run KQL", "kusto query --file .\\queries\\top-states.kql --cluster help --database Samples"],
                             ["Optional aliases", "aliases | clusters | db | databases | tables | ls | get | schema | rm | delete | use | run | exec | --db | --limit | -f"]
                         ])
@@ -496,12 +498,17 @@ public static class CommandFactory
         {
             Description = "Include query execution statistics when Kusto returns them."
         };
+        var chartOption = new Option<bool>("--chart")
+        {
+            Description = "Render compatible query charts in the terminal for human output or as Mermaid for markdown output."
+        };
 
         queryCommand.Add(queryArgument);
         queryCommand.Add(queryFileOption);
         queryCommand.Add(clusterOption);
         queryCommand.Add(databaseOption);
         queryCommand.Add(showStatsOption);
+        queryCommand.Add(chartOption);
         queryCommand.SetAction((parseResult, cancellationToken) =>
         {
             var queryText = parseResult.GetValue(queryArgument);
@@ -509,11 +516,20 @@ public static class CommandFactory
             var clusterReference = parseResult.GetValue(clusterOption);
             var databaseName = parseResult.GetValue(databaseOption);
             var showStats = parseResult.GetValue(showStatsOption);
+            var showChart = parseResult.GetValue(chartOption);
             var format = parseResult.GetRequiredValue(formatOption);
             var logLevel = parseResult.GetValue(logLevelOption);
 
             return CliRunner.RunAsync(format, logLevel, async (runtime, ct) =>
             {
+                var isJsonOutput = string.Equals(format, "json", StringComparison.OrdinalIgnoreCase);
+                var isMarkdownOutput = string.Equals(format, "markdown", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(format, "md", StringComparison.OrdinalIgnoreCase);
+                if (showChart && isJsonOutput)
+                {
+                    throw new UserFacingException("--chart can't be used with --format json.");
+                }
+
                 var config = await runtime.ConfigStore.LoadAsync(ct);
                 var resolvedCluster = runtime.ConnectionResolver.ResolveCluster(config, clusterReference);
                 var resolvedDatabase = runtime.ConnectionResolver.ResolveDatabase(config, resolvedCluster.Url, databaseName);
@@ -531,11 +547,54 @@ public static class CommandFactory
                     showStats,
                     ct);
 
+                string? chartHint = null;
+                string? chartMessage = null;
+                string? humanChart = null;
+                string? markdownChart = null;
+                if (result.Visualization is not null)
+                {
+                    var compatibility = KustoChartCompatibilityAnalyzer.Analyze(result.Table, result.Visualization);
+                    if (showChart)
+                    {
+                        if (isMarkdownOutput)
+                        {
+                            if (compatibility.MarkdownChart is not null)
+                            {
+                                markdownChart = MermaidChartRenderer.Render(compatibility.MarkdownChart);
+                            }
+                            else
+                            {
+                                chartMessage = compatibility.MarkdownReason;
+                            }
+                        }
+                        else
+                        {
+                            if (compatibility.HumanChart is not null)
+                            {
+                                humanChart = await Hex1bChartRenderer.RenderAsync(compatibility.HumanChart, ct);
+                            }
+                            else
+                            {
+                                chartMessage = compatibility.HumanReason;
+                            }
+                        }
+                    }
+                    else if (!isMarkdownOutput && compatibility.HumanChart is not null)
+                    {
+                        chartHint = "This query can be rendered as a terminal chart. Re-run with --chart to see it.";
+                    }
+                }
+
                 return new CliOutput
                 {
                     Table = result.Table,
                     WebExplorerUrl = result.WebExplorerUrl,
                     Statistics = result.Statistics,
+                    Visualization = result.Visualization,
+                    ChartHint = chartHint,
+                    ChartMessage = chartMessage,
+                    HumanChart = humanChart,
+                    MarkdownChart = markdownChart,
                     IsQueryResultTable = true
                 };
             }, cancellationToken);

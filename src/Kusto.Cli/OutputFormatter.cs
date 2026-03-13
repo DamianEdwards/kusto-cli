@@ -78,6 +78,28 @@ public sealed class OutputFormatter : IOutputFormatter
             wroteSection = true;
         }
 
+        if (output.Visualization is not null)
+        {
+            if (wroteSection)
+            {
+                console.WriteLine();
+            }
+
+            WriteVisualizationSection(console, output.Visualization, output.ChartHint, output.ChartMessage);
+            wroteSection = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(output.HumanChart))
+        {
+            if (wroteSection)
+            {
+                console.WriteLine();
+            }
+
+            console.Write(new Text(output.HumanChart));
+            wroteSection = true;
+        }
+
         if (!string.IsNullOrWhiteSpace(output.WebExplorerUrl))
         {
             if (wroteSection)
@@ -134,6 +156,26 @@ public sealed class OutputFormatter : IOutputFormatter
             }
         }
 
+        if (output.Visualization is not null)
+        {
+            if (buffer.Length > 0)
+            {
+                buffer.AppendLine();
+            }
+
+            AppendVisualizationSection(buffer, output.Visualization, output.ChartHint, output.ChartMessage);
+        }
+
+        if (!string.IsNullOrWhiteSpace(output.MarkdownChart))
+        {
+            if (buffer.Length > 0)
+            {
+                buffer.AppendLine();
+            }
+
+            buffer.AppendLine(output.MarkdownChart);
+        }
+
         if (!string.IsNullOrWhiteSpace(output.WebExplorerUrl))
         {
             if (buffer.Length > 0)
@@ -168,6 +210,32 @@ public sealed class OutputFormatter : IOutputFormatter
         return output.Properties is null
             ? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, string?>(output.Properties, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<string, string?> BuildVisualizationProperties(QueryVisualization visualization)
+    {
+        var properties = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+        AddStatistic(properties, "Title", visualization.Title);
+        AddStatistic(properties, "XColumn", visualization.XColumn);
+        AddStatistic(properties, "YColumns", Join(visualization.YColumns));
+        AddStatistic(properties, "Series", Join(visualization.Series));
+        AddStatistic(properties, "XTitle", visualization.XTitle);
+        AddStatistic(properties, "YTitle", visualization.YTitle);
+        AddStatistic(properties, "Kind", visualization.Kind);
+        AddStatistic(properties, "Legend", visualization.Legend);
+        AddStatistic(properties, "YMin", FormatNumber(visualization.YMin));
+        AddStatistic(properties, "YMax", FormatNumber(visualization.YMax));
+
+        if (visualization.AdditionalProperties is not null)
+        {
+            foreach (var pair in visualization.AdditionalProperties.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                AddStatistic(properties, $"Additional.{pair.Key}", pair.Value);
+            }
+        }
+
+        return properties;
     }
 
     private static Dictionary<string, string?> FlattenStatistics(QueryStatistics statistics)
@@ -247,6 +315,54 @@ public sealed class OutputFormatter : IOutputFormatter
         }
     }
 
+    private static void WriteVisualizationSection(IAnsiConsole console, QueryVisualization visualization, string? chartHint, string? chartMessage)
+    {
+        var name = visualization.Visualization ?? "visualization";
+        console.MarkupLine($"Render requested: {Markup.Escape(name)}");
+
+        var properties = BuildVisualizationProperties(visualization);
+        foreach (var pair in properties.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            console.MarkupLine($"  [grey]{Markup.Escape(pair.Key)}:[/] {Markup.Escape(pair.Value ?? string.Empty)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(chartHint))
+        {
+            console.MarkupLine(Markup.Escape(chartHint));
+        }
+
+        if (!string.IsNullOrWhiteSpace(chartMessage))
+        {
+            console.MarkupLine(Markup.Escape(chartMessage));
+        }
+    }
+
+    private static void AppendVisualizationSection(StringBuilder buffer, QueryVisualization visualization, string? chartHint, string? chartMessage)
+    {
+        buffer.AppendLine("### Render");
+        buffer.AppendLine();
+        buffer.AppendLine($"Render requested: {visualization.Visualization ?? "visualization"}");
+        buffer.AppendLine();
+
+        var properties = BuildVisualizationProperties(visualization);
+        if (properties.Count > 0)
+        {
+            AppendPropertiesTable(buffer, properties);
+            buffer.AppendLine();
+        }
+
+        if (!string.IsNullOrWhiteSpace(chartHint))
+        {
+            buffer.AppendLine(chartHint);
+            buffer.AppendLine();
+        }
+
+        if (!string.IsNullOrWhiteSpace(chartMessage))
+        {
+            buffer.AppendLine(chartMessage);
+        }
+    }
+
     private static string? FormatNumber(double? value)
     {
         return value?.ToString("0.##", CultureInfo.InvariantCulture);
@@ -260,6 +376,13 @@ public sealed class OutputFormatter : IOutputFormatter
     private static string EscapeMarkdown(string value)
     {
         return value.Replace("|", "\\|", StringComparison.Ordinal);
+    }
+
+    private static string? Join(IReadOnlyList<string>? values)
+    {
+        return values is { Count: > 0 }
+            ? string.Join(", ", values)
+            : null;
     }
 
     private static void WriteWebExplorerLink(IAnsiConsole console, string url, bool useAnsi)

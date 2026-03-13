@@ -12,6 +12,16 @@ public sealed class CliOutput
     public string? WebExplorerUrl { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public QueryStatistics? Statistics { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public QueryVisualization? Visualization { get; init; }
+    [JsonIgnore]
+    public string? ChartHint { get; init; }
+    [JsonIgnore]
+    public string? ChartMessage { get; init; }
+    [JsonIgnore]
+    public string? HumanChart { get; init; }
+    [JsonIgnore]
+    public string? MarkdownChart { get; init; }
     [JsonIgnore]
     public bool IsQueryResultTable { get; init; }
 }
@@ -39,11 +49,46 @@ public sealed class TabularData(IReadOnlyList<string> columns, IReadOnlyList<IRe
     }
 }
 
-public sealed class QueryExecutionResult(TabularData table, string? webExplorerUrl, QueryStatistics? statistics)
+public sealed class QueryExecutionResult(
+    TabularData table,
+    string? webExplorerUrl,
+    QueryStatistics? statistics,
+    QueryVisualization? visualization)
 {
     public TabularData Table { get; } = table;
     public string? WebExplorerUrl { get; } = webExplorerUrl;
     public QueryStatistics? Statistics { get; } = statistics;
+    public QueryVisualization? Visualization { get; } = visualization;
+}
+
+public sealed class QueryVisualization
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Visualization { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Title { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? XTitle { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? YTitle { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? XColumn { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? YColumns { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Series { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Kind { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Legend { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? YMin { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? YMax { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, string?>? AdditionalProperties { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Raw { get; init; }
 }
 
 public sealed class QueryStatistics
@@ -205,4 +250,46 @@ internal sealed class DatabaseSchemaCacheEntry
     public DateTimeOffset CachedAtUtc { get; set; }
     public string? SchemaVersion { get; set; }
     public string SchemaJson { get; set; } = string.Empty;
+}
+
+internal enum QueryChartKind
+{
+    Column,
+    Bar,
+    Line,
+    Pie
+}
+
+internal enum QueryChartLayout
+{
+    Simple,
+    Grouped,
+    Stacked,
+    Stacked100
+}
+
+internal sealed class QueryChartSeries(string name, IReadOnlyList<double> values)
+{
+    public string Name { get; } = name;
+    public IReadOnlyList<double> Values { get; } = values;
+}
+
+internal sealed class QueryChartDefinition
+{
+    public QueryChartKind Kind { get; init; }
+    public QueryChartLayout Layout { get; init; } = QueryChartLayout.Simple;
+    public bool Horizontal { get; init; }
+    public string? Title { get; init; }
+    public string? XTitle { get; init; }
+    public string? YTitle { get; init; }
+    public IReadOnlyList<string> Categories { get; init; } = [];
+    public IReadOnlyList<QueryChartSeries> Series { get; init; } = [];
+}
+
+internal sealed class QueryChartCompatibility
+{
+    public QueryChartDefinition? HumanChart { get; init; }
+    public string? HumanReason { get; init; }
+    public QueryChartDefinition? MarkdownChart { get; init; }
+    public string? MarkdownReason { get; init; }
 }
