@@ -38,7 +38,7 @@ internal static class KustoChartCompatibilityAnalyzer
         {
             return new QueryChartCompatibility
             {
-                HumanReason = "The 'piechart' render kind is not supported for terminal chart rendering.",
+                HumanReason = "This piechart can't be rendered in the terminal because it requires exactly one numeric value column.",
                 MarkdownReason = "This piechart requires exactly one numeric value column for Mermaid pie output."
             };
         }
@@ -52,7 +52,7 @@ internal static class KustoChartCompatibilityAnalyzer
             {
                 return new QueryChartCompatibility
                 {
-                    HumanReason = "The 'piechart' render kind is not supported for terminal chart rendering.",
+                    HumanReason = "This piechart can't be rendered in the terminal because it contains an empty label value.",
                     MarkdownReason = "This piechart has an empty label value that Mermaid pie output can't represent safely."
                 };
             }
@@ -61,7 +61,7 @@ internal static class KustoChartCompatibilityAnalyzer
             {
                 return new QueryChartCompatibility
                 {
-                    HumanReason = "The 'piechart' render kind is not supported for terminal chart rendering.",
+                    HumanReason = $"This piechart can't be rendered in the terminal because column '{valueColumns[0]}' contains a non-numeric value.",
                     MarkdownReason = $"This piechart can't be rendered as Mermaid because column '{valueColumns[0]}' contains a non-numeric value."
                 };
             }
@@ -70,7 +70,7 @@ internal static class KustoChartCompatibilityAnalyzer
             {
                 return new QueryChartCompatibility
                 {
-                    HumanReason = "The 'piechart' render kind is not supported for terminal chart rendering.",
+                    HumanReason = "This piechart can't be rendered in the terminal because pie segments require positive values greater than zero.",
                     MarkdownReason = "Mermaid pie charts require positive values greater than zero."
                 };
             }
@@ -79,19 +79,30 @@ internal static class KustoChartCompatibilityAnalyzer
             values.Add(value);
         }
 
+        if (labels.Count == 0)
+        {
+            return new QueryChartCompatibility
+            {
+                HumanReason = "This piechart can't be rendered in the terminal because the result contains no rows.",
+                MarkdownReason = "This piechart can't be rendered as Mermaid because the result contains no rows."
+            };
+        }
+
+        var definition = new QueryChartDefinition
+        {
+            Kind = QueryChartKind.Pie,
+            Title = visualization.Title,
+            Categories = labels,
+            Series =
+            [
+                new QueryChartSeries(valueColumns[0], values)
+            ]
+        };
+
         return new QueryChartCompatibility
         {
-            HumanReason = "The 'piechart' render kind is not supported for terminal chart rendering.",
-            MarkdownChart = new QueryChartDefinition
-            {
-                Kind = QueryChartKind.Pie,
-                Title = visualization.Title,
-                Categories = labels,
-                Series =
-                [
-                    new QueryChartSeries(valueColumns[0], values)
-                ]
-            }
+            HumanChart = definition,
+            MarkdownChart = definition
         };
     }
 

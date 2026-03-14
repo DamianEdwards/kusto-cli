@@ -96,7 +96,10 @@ public sealed class OutputFormatter : IOutputFormatter
                 console.WriteLine();
             }
 
-            console.Write(new Text(output.HumanChart));
+            var selectedChart = useAnsi && !string.IsNullOrWhiteSpace(output.HumanChartAnsi)
+                ? output.HumanChartAnsi
+                : output.HumanChart;
+            writer.Write(selectedChart);
             wroteSection = true;
         }
 

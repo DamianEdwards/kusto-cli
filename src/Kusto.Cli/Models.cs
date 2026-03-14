@@ -21,10 +21,14 @@ public sealed class CliOutput
     [JsonIgnore]
     public string? HumanChart { get; init; }
     [JsonIgnore]
+    public string? HumanChartAnsi { get; init; }
+    [JsonIgnore]
     public string? MarkdownChart { get; init; }
     [JsonIgnore]
     public bool IsQueryResultTable { get; init; }
 }
+
+internal sealed record HumanChartRenderResult(string PlainText, string? AnsiText);
 
 public sealed class TabularData(IReadOnlyList<string> columns, IReadOnlyList<IReadOnlyList<string?>> rows)
 {

@@ -50,7 +50,7 @@ There is no separate lint command configured in this repository.
 - `src/Kusto.Cli/KustoVisualizationExtractor.cs` parses Kusto `render` annotations from query responses into `QueryVisualization`.
 - `src/Kusto.Cli/KustoChartCompatibilityAnalyzer.cs` is the compatibility gate for chart rendering. It maps Kusto render kinds to `QueryChartKind`, validates columns/layouts, and produces either a `HumanChart`, a `MarkdownChart`, or explicit reasons why rendering is not supported.
 - `src/Kusto.Cli/Models.cs` defines the chart model surface: `QueryChartKind` (`Column`, `Bar`, `Line`, `Pie`) and `QueryChartLayout` (`Simple`, `Grouped`, `Stacked`, `Stacked100`).
-- `src/Kusto.Cli/Hex1bChartRenderer.cs` is the terminal renderer used for human output. It renders only `Column`, `Bar`, and `Line`.
+- `src/Kusto.Cli/Hex1bChartRenderer.cs` is the terminal renderer used for human output. It renders `Column`, `Bar`, `Line`, and `Pie`.
 - `src/Kusto.Cli/MermaidChartRenderer.cs` is the markdown renderer. It renders Mermaid `xychart` output for cartesian charts and Mermaid `pie` output for pie charts.
 - In `src/Kusto.Cli/CommandFactory.cs`, `query --chart` chooses Hex1b for `human` output and Mermaid for `markdown`/`md`; JSON output does not support chart rendering.
 
@@ -91,9 +91,9 @@ There is no separate lint command configured in this repository.
    - Any other Kusto render kind should surface an explicit "not supported" reason rather than silently falling back.
 
 7. **Human vs markdown chart support differs intentionally**
-   - Terminal (`human` + `--chart`) currently supports `columnchart`, `barchart`, and `linechart`/`timechart`.
-   - Markdown (`markdown`/`md` + `--chart`) supports those cartesian charts plus `piechart`.
-   - `piechart` is markdown-only; terminal output should keep the table and explain that the render kind is not supported for terminal chart rendering.
+   - Terminal (`human` + `--chart`) currently supports `columnchart`, `barchart`, `linechart`/`timechart`, and `piechart`.
+   - Markdown (`markdown`/`md` + `--chart`) supports those same chart kinds.
+   - `piechart` terminal output should render via Hex1b's donut/pie support and include a legend with values/percentages when feasible.
    - Mermaid cartesian output currently requires `Simple` layout and exactly one series; if the chart can't be represented faithfully, preserve the table and emit the markdown reason instead of approximating.
 
 8. **Layout support is chart-kind specific**

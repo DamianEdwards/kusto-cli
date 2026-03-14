@@ -29,7 +29,7 @@ public sealed class KustoChartCompatibilityAnalyzerTests
     }
 
     [Fact]
-    public void Analyze_PieChart_IsOnlyCompatibleForMarkdown()
+    public void Analyze_PieChart_IsCompatibleForHumanAndMarkdown()
     {
         var table = new TabularData(
             ["State", "Count"],
@@ -47,10 +47,32 @@ public sealed class KustoChartCompatibilityAnalyzerTests
 
         var result = KustoChartCompatibilityAnalyzer.Analyze(table, visualization);
 
-        Assert.Null(result.HumanChart);
-        Assert.Contains("piechart", result.HumanReason, StringComparison.OrdinalIgnoreCase);
+        Assert.NotNull(result.HumanChart);
+        Assert.Equal(QueryChartKind.Pie, result.HumanChart!.Kind);
         Assert.NotNull(result.MarkdownChart);
         Assert.Equal(QueryChartKind.Pie, result.MarkdownChart!.Kind);
+    }
+
+    [Fact]
+    public void Analyze_PieChart_WithNoRows_IsRejectedForHumanAndMarkdown()
+    {
+        var table = new TabularData(
+            ["State", "Count"],
+            []);
+        var visualization = new QueryVisualization
+        {
+            Visualization = "piechart",
+            XColumn = "State",
+            YColumns = ["Count"],
+            Title = "Top states"
+        };
+
+        var result = KustoChartCompatibilityAnalyzer.Analyze(table, visualization);
+
+        Assert.Null(result.HumanChart);
+        Assert.Contains("no rows", result.HumanReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(result.MarkdownChart);
+        Assert.Contains("no rows", result.MarkdownReason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

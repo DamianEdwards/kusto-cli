@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Diagnostics;
 using Hex1b;
@@ -13,8 +14,16 @@ internal static class Hex1bChartRenderer
     private const int ChartHeight = 24;
     private static readonly TimeSpan RenderTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RenderPollInterval = TimeSpan.FromMilliseconds(50);
+    private static readonly TerminalAnsiOptions AnsiOptions = new()
+    {
+        IncludeClearScreen = false,
+        IncludeCursorPosition = false,
+        IncludeTrailingNewline = false,
+        RenderNullAsSpace = true,
+        ResetAtEnd = true
+    };
 
-    public static async Task<string> RenderAsync(QueryChartDefinition chart, CancellationToken cancellationToken)
+    public static async Task<HumanChartRenderResult> RenderAsync(QueryChartDefinition chart, CancellationToken cancellationToken)
     {
         await using var terminal = Hex1bTerminal.CreateBuilder()
             .WithHeadless()
@@ -45,14 +54,14 @@ internal static class Hex1bChartRenderer
         }
     }
 
-    private static async Task<string> WaitForRenderedScreenAsync(
+    private static async Task<HumanChartRenderResult> WaitForRenderedScreenAsync(
         Hex1bTerminal terminal,
         QueryChartDefinition chart,
         Task runTask,
         CancellationToken cancellationToken)
     {
         var expectedTitle = chart.Title ?? "Chart";
-        string? lastRenderedScreen = null;
+        HumanChartRenderResult? lastRenderedChart = null;
         var stopwatch = Stopwatch.StartNew();
 
         while (stopwatch.Elapsed < RenderTimeout)
@@ -63,21 +72,21 @@ internal static class Hex1bChartRenderer
             }
 
             using var snapshot = terminal.CreateSnapshot();
-            var screenText = Normalize(snapshot.GetScreenText());
-            if (!string.IsNullOrWhiteSpace(screenText) &&
-                screenText.Contains(expectedTitle, StringComparison.Ordinal) &&
-                string.Equals(screenText, lastRenderedScreen, StringComparison.Ordinal))
+            var renderedChart = CaptureRenderedChart(snapshot);
+            if (!string.IsNullOrWhiteSpace(renderedChart.PlainText) &&
+                renderedChart.PlainText.Contains(expectedTitle, StringComparison.Ordinal) &&
+                string.Equals(renderedChart.PlainText, lastRenderedChart?.PlainText, StringComparison.Ordinal))
             {
-                return screenText;
+                return renderedChart;
             }
 
-            lastRenderedScreen = screenText;
+            lastRenderedChart = renderedChart;
             await Task.Delay(RenderPollInterval, cancellationToken);
         }
 
-        if (!string.IsNullOrWhiteSpace(lastRenderedScreen))
+        if (!string.IsNullOrWhiteSpace(lastRenderedChart?.PlainText))
         {
-            return lastRenderedScreen;
+            return lastRenderedChart!;
         }
 
         throw new InvalidOperationException("Timed out waiting for Hex1b to render the chart.");
@@ -85,12 +94,12 @@ internal static class Hex1bChartRenderer
 
     private static Hex1bWidget BuildWidget(RootContext ctx, QueryChartDefinition chart)
     {
-        var rows = BuildRows(chart);
         return chart.Kind switch
         {
-            QueryChartKind.Column => ConfigureColumnChart(ctx.ColumnChart(rows), chart),
-            QueryChartKind.Bar => ConfigureBarChart(ctx.BarChart(rows), chart),
-            QueryChartKind.Line => ConfigureTimeSeriesChart(ctx.TimeSeriesChart(rows), chart),
+            QueryChartKind.Column => ConfigureColumnChart(ctx.ColumnChart(BuildRows(chart)), chart),
+            QueryChartKind.Bar => ConfigureBarChart(ctx.BarChart(BuildRows(chart)), chart),
+            QueryChartKind.Line => ConfigureTimeSeriesChart(ctx.TimeSeriesChart(BuildRows(chart)), chart),
+            QueryChartKind.Pie => ConfigurePieChart(ctx, chart),
             _ => ctx.Text("Unsupported chart")
         };
     }
@@ -163,6 +172,22 @@ internal static class Hex1bChartRenderer
         };
     }
 
+    private static Hex1bWidget ConfigurePieChart(RootContext ctx, QueryChartDefinition chart)
+    {
+        var items = BuildPieItems(chart);
+        return ctx.HStack(h =>
+        [
+            h.DonutChart(items)
+                .HoleSize(0)
+                .Title(chart.Title ?? "Chart")
+                .FillHeight(),
+            h.Legend(items)
+                .ShowValues(true)
+                .ShowPercentages(true)
+                .FormatValue(value => value.ToString("0.###", CultureInfo.InvariantCulture))
+        ]);
+    }
+
     private static IReadOnlyList<Hex1bChartRow> BuildRows(QueryChartDefinition chart)
     {
         var rows = new List<Hex1bChartRow>(chart.Categories.Count);
@@ -178,6 +203,35 @@ internal static class Hex1bChartRenderer
         }
 
         return rows;
+    }
+
+    private static IReadOnlyList<ChartItem> BuildPieItems(QueryChartDefinition chart)
+    {
+        if (chart.Series.Count != 1)
+        {
+            throw new InvalidOperationException("Pie charts require exactly one series.");
+        }
+
+        var series = chart.Series[0];
+        if (series.Values.Count != chart.Categories.Count)
+        {
+            throw new InvalidOperationException("Pie chart series values must match the category count.");
+        }
+
+        var items = new List<ChartItem>(chart.Categories.Count);
+        for (var categoryIndex = 0; categoryIndex < chart.Categories.Count; categoryIndex++)
+        {
+            items.Add(new ChartItem(chart.Categories[categoryIndex], series.Values[categoryIndex]));
+        }
+
+        return items;
+    }
+
+    private static HumanChartRenderResult CaptureRenderedChart(Hex1bTerminalSnapshot snapshot)
+    {
+        var plainText = Normalize(snapshot.GetScreenText());
+        var ansiText = snapshot.ToAnsi(AnsiOptions);
+        return new HumanChartRenderResult(plainText, ansiText);
     }
 
     private static string Normalize(string screenText)
@@ -204,6 +258,5 @@ internal static class Hex1bChartRenderer
 
         return builder.ToString().TrimEnd();
     }
-
     private sealed record Hex1bChartRow(string Label, Dictionary<string, double> Values);
 }
