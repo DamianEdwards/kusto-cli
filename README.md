@@ -98,6 +98,99 @@ Layout support:
 - `columnchart` and `barchart` support `default`/`unstacked`, `grouped`, `stacked`, and `stacked100` for terminal rendering
 - Mermaid cartesian output currently requires the simple/default layout and exactly one series
 
+Example terminal renderings captured as plain text:
+
+- These examples use the exact Unicode block characters produced by the terminal renderer, shown in fenced code blocks so they can live in the README without screenshots.
+- Exact spacing can vary a little by font and viewport width.
+- Pie charts are supported in the terminal too, but they rely more heavily on terminal color, so the text-only README examples below focus on column, bar, and line charts.
+
+Column chart example:
+
+```text
+                                             Top states
+         4,701                    3,166                    2,014                    1,580
+████████████████████████
+████████████████████████
+████████████████████████
+████████████████████████
+████████████████████████
+████████████████████████
+████████████████████████ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+████████████████████████ ████████████████████████
+████████████████████████ ████████████████████████
+████████████████████████ ████████████████████████
+████████████████████████ ████████████████████████
+████████████████████████ ████████████████████████
+████████████████████████ ████████████████████████ ████████████████████████
+████████████████████████ ████████████████████████ ████████████████████████
+████████████████████████ ████████████████████████ ████████████████████████ ████████████████████████
+████████████████████████ ████████████████████████ ████████████████████████ ████████████████████████
+████████████████████████ ████████████████████████ ████████████████████████ ████████████████████████
+████████████████████████ ████████████████████████ ████████████████████████ ████████████████████████
+████████████████████████ ████████████████████████ ████████████████████████ ████████████████████████
+████████████████████████ ████████████████████████ ████████████████████████ ████████████████████████
+████████████████████████ ████████████████████████ ████████████████████████ ████████████████████████
+         TEXAS                    KANSAS                   NEVADA                    UTAH
+```
+
+Bar chart example:
+
+```text
+                                           Top databases
+             ███████████████████████████████████████████████████████████████████████████████
+             ███████████████████████████████████████████████████████████████████████████████
+Samples      ███████████████████████████████████████████████████████████████████████████████ 942
+             ███████████████████████████████████████████████████████████████████████████████
+             ███████████████████████████████████████████████████████████████████████████████
+
+             ████████████
+             ████████████
+StormEvents  ████████████                                                                    143
+             ████████████
+             ████████████
+
+             ████▉
+             ████▉
+NetDefaultDB ████▉                                                                           58
+             ████▉
+             ████▉
+
+             █▊
+             █▊
+Weather      █▊                                                                              21
+             █▊
+             █▊
+```
+
+Line chart example:
+
+```text
+                                           Request volume
+                                                           ⣀⠤⠒⠉⠒⠢⠤⣀⡀
+                                                       ⣀⠤⠒⠉        ⠈⠉⠒⠢⠤⣀
+                                                   ⣀⠤⠒⠉                  ⠉⠑⠒⠤⢄⣀
+                                               ⣀⠤⠒⠉                            ⠉⠑⠢⣀
+                                           ⢀⠤⠒⠉                                    ⠑⠤⡀
+                                          ⡠⠃                                         ⠈⠒⢄
+  400                                    ⡔⠁                                             ⠉⠢⣀
+                                       ⢀⠜                                                  ⠑⠤⡀
+                                      ⢠⠊                                                     ⠈⠒⢄
+                                     ⡰⠁                                                         ⠉⠢⣀
+                                    ⡜                                                              ⠑
+                                  ⢀⠎
+                                 ⡠⠃
+  200                           ⡔⠁
+                              ⢀⠜
+                             ⢠⠊
+                            ⡰⠁
+      ⠒⠢⠤⢄⣀⡀               ⡜
+           ⠈⠉⠑⠒⠢⠤⢄⣀⡀     ⢀⠎
+                   ⠈⠉⠑⠒⠢⠤⠃
+
+    0
+      00:00           04:00              08:00             12:00              16:00            20:00
+```
+
 If a query returns visualization metadata but `--chart` is omitted, the CLI will hint when the result is compatible with terminal chart rendering. If a render kind or layout can't be mapped faithfully to Hex1b or Mermaid, the CLI will keep the table output and show an explanatory message instead.
 
 ## Schema cache
