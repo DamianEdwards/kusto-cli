@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Diagnostics;
 using Hex1b;
@@ -85,12 +86,12 @@ internal static class Hex1bChartRenderer
 
     private static Hex1bWidget BuildWidget(RootContext ctx, QueryChartDefinition chart)
     {
-        var rows = BuildRows(chart);
         return chart.Kind switch
         {
-            QueryChartKind.Column => ConfigureColumnChart(ctx.ColumnChart(rows), chart),
-            QueryChartKind.Bar => ConfigureBarChart(ctx.BarChart(rows), chart),
-            QueryChartKind.Line => ConfigureTimeSeriesChart(ctx.TimeSeriesChart(rows), chart),
+            QueryChartKind.Column => ConfigureColumnChart(ctx.ColumnChart(BuildRows(chart)), chart),
+            QueryChartKind.Bar => ConfigureBarChart(ctx.BarChart(BuildRows(chart)), chart),
+            QueryChartKind.Line => ConfigureTimeSeriesChart(ctx.TimeSeriesChart(BuildRows(chart)), chart),
+            QueryChartKind.Pie => ConfigurePieChart(ctx, chart),
             _ => ctx.Text("Unsupported chart")
         };
     }
@@ -163,6 +164,22 @@ internal static class Hex1bChartRenderer
         };
     }
 
+    private static Hex1bWidget ConfigurePieChart(RootContext ctx, QueryChartDefinition chart)
+    {
+        var items = BuildPieItems(chart);
+        return ctx.HStack(h =>
+        [
+            h.DonutChart(items)
+                .HoleSize(0)
+                .Title(chart.Title ?? "Chart")
+                .FillHeight(),
+            h.Legend(items)
+                .ShowValues(true)
+                .ShowPercentages(true)
+                .FormatValue(value => value.ToString("0.###", CultureInfo.InvariantCulture))
+        ]);
+    }
+
     private static IReadOnlyList<Hex1bChartRow> BuildRows(QueryChartDefinition chart)
     {
         var rows = new List<Hex1bChartRow>(chart.Categories.Count);
@@ -178,6 +195,28 @@ internal static class Hex1bChartRenderer
         }
 
         return rows;
+    }
+
+    private static IReadOnlyList<ChartItem> BuildPieItems(QueryChartDefinition chart)
+    {
+        if (chart.Series.Count != 1)
+        {
+            throw new InvalidOperationException("Pie charts require exactly one series.");
+        }
+
+        var series = chart.Series[0];
+        if (series.Values.Count != chart.Categories.Count)
+        {
+            throw new InvalidOperationException("Pie chart series values must match the category count.");
+        }
+
+        var items = new List<ChartItem>(chart.Categories.Count);
+        for (var categoryIndex = 0; categoryIndex < chart.Categories.Count; categoryIndex++)
+        {
+            items.Add(new ChartItem(chart.Categories[categoryIndex], series.Values[categoryIndex]));
+        }
+
+        return items;
     }
 
     private static string Normalize(string screenText)

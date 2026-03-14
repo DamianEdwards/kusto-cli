@@ -22,7 +22,7 @@
 
   <ItemGroup>
     <PackageReference Include="Azure.Identity" Version="1.18.0" />
-    <PackageReference Include="Hex1b" Version="0.116.0" />
+    <PackageReference Include="Hex1b" Version="0.118.0" />
     <PackageReference Include="Microsoft.Azure.Kusto.Language" Version="12.3.2" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.3" />

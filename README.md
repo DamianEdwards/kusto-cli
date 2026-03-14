@@ -90,7 +90,7 @@ Supported render kinds:
 | `barchart` | yes | yes | Human output renders a terminal bar chart; markdown emits Mermaid `xychart horizontal`. |
 | `linechart` | yes | yes | Human output renders a terminal line chart; markdown emits Mermaid `xychart`. |
 | `timechart` | yes | yes | Alias of `linechart`. |
-| `piechart` | no | yes | Markdown-only; terminal output keeps the table and explains that pie charts are not supported there. |
+| `piechart` | yes | yes | Human output renders a terminal pie chart with a legend; markdown emits Mermaid `pie`. |
 
 Layout support:
 

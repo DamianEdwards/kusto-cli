@@ -22,4 +22,26 @@ public sealed class Hex1bChartRendererTests
         Assert.Contains("TEXAS", rendered, StringComparison.Ordinal);
         Assert.Contains("KANSAS", rendered, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task RenderAsync_PieChart_RendersTitleLegendAndPercentages()
+    {
+        var chart = new QueryChartDefinition
+        {
+            Kind = QueryChartKind.Pie,
+            Title = "Top states",
+            Categories = ["TEXAS", "KANSAS"],
+            Series =
+            [
+                new QueryChartSeries("Count", [60, 40])
+            ]
+        };
+
+        var rendered = await Hex1bChartRenderer.RenderAsync(chart, CancellationToken.None);
+
+        Assert.Contains("Top states", rendered, StringComparison.Ordinal);
+        Assert.Contains("TEXAS", rendered, StringComparison.Ordinal);
+        Assert.Contains("KANSAS", rendered, StringComparison.Ordinal);
+        Assert.Contains("%", rendered, StringComparison.Ordinal);
+    }
 }

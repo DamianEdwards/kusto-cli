@@ -181,6 +181,27 @@ public sealed class OutputFormatterTests
     }
 
     [Fact]
+    public void FormatHuman_QueryOutput_WithPieHumanChart_AppendsRenderedChart()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(["State", "Count"], [["TEXAS", "60"], ["KANSAS", "40"]]),
+            Visualization = new QueryVisualization
+            {
+                Visualization = "piechart"
+            },
+            HumanChart = "Top states\nTEXAS 60 60%\nKANSAS 40 40%"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Human);
+
+        Assert.Contains("Top states", rendered, StringComparison.Ordinal);
+        Assert.Contains("TEXAS 60 60%", rendered, StringComparison.Ordinal);
+        Assert.Contains("KANSAS 40 40%", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FormatJson_QueryOutput_WithVisualization_IncludesStructuredMetadata()
     {
         var formatter = new OutputFormatter();
