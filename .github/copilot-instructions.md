@@ -46,6 +46,14 @@ There is no separate lint command configured in this repository.
 - `src/Kusto.Cli/Logging.cs` configures always-on file logging (`%TEMP%\kusto\kusto.log`) and optional stderr logging when `--log-level` is explicitly set.
 - `src/Kusto.Cli/KustoConsoleFormatter.cs` and `src/Kusto.Cli/ConsoleStyling.cs` apply console styling (light-gray logs, red errors, ANSI-aware behavior).
 
+### 6) Chart rendering pipeline
+- `src/Kusto.Cli/KustoVisualizationExtractor.cs` parses Kusto `render` annotations from query responses into `QueryVisualization`.
+- `src/Kusto.Cli/KustoChartCompatibilityAnalyzer.cs` is the compatibility gate for chart rendering. It maps Kusto render kinds to `QueryChartKind`, validates columns/layouts, and produces either a `HumanChart`, a `MarkdownChart`, or explicit reasons why rendering is not supported.
+- `src/Kusto.Cli/Models.cs` defines the chart model surface: `QueryChartKind` (`Column`, `Bar`, `Line`, `Pie`) and `QueryChartLayout` (`Simple`, `Grouped`, `Stacked`, `Stacked100`).
+- `src/Kusto.Cli/Hex1bChartRenderer.cs` is the terminal renderer used for human output. It renders only `Column`, `Bar`, and `Line`.
+- `src/Kusto.Cli/MermaidChartRenderer.cs` is the markdown renderer. It renders Mermaid `xychart` output for cartesian charts and Mermaid `pie` output for pie charts.
+- In `src/Kusto.Cli/CommandFactory.cs`, `query --chart` chooses Hex1b for `human` output and Mermaid for `markdown`/`md`; JSON output does not support chart rendering.
+
 ## Key repository conventions
 
 1. **User-facing errors must be actionable and implementation-agnostic**
@@ -72,3 +80,23 @@ There is no separate lint command configured in this repository.
 5. **Output formatting contract**
    - Command handlers should return `CliOutput` (`Message`, `Properties`, `Table`) and rely on `OutputFormatter`.
    - Prefer returning structured data and let formatter handle rendering differences across output modes.
+
+6. **Chart compatibility rules are centralized**
+   - Always route render-kind and layout decisions through `KustoChartCompatibilityAnalyzer`; do not duplicate chart compatibility logic in command handlers or formatters.
+   - Current render-kind mapping is:
+     - `columnchart` => `QueryChartKind.Column`
+     - `barchart` => `QueryChartKind.Bar`
+     - `linechart` and `timechart` => `QueryChartKind.Line`
+     - `piechart` => `QueryChartKind.Pie`
+   - Any other Kusto render kind should surface an explicit "not supported" reason rather than silently falling back.
+
+7. **Human vs markdown chart support differs intentionally**
+   - Terminal (`human` + `--chart`) currently supports `columnchart`, `barchart`, and `linechart`/`timechart`.
+   - Markdown (`markdown`/`md` + `--chart`) supports those cartesian charts plus `piechart`.
+   - `piechart` is markdown-only; terminal output should keep the table and explain that the render kind is not supported for terminal chart rendering.
+   - Mermaid cartesian output currently requires `Simple` layout and exactly one series; if the chart can't be represented faithfully, preserve the table and emit the markdown reason instead of approximating.
+
+8. **Layout support is chart-kind specific**
+   - For line charts, supported human layouts are `default`/`unstacked`, `stacked`, and `stacked100`.
+   - For column/bar charts, supported human layouts are `default`/`unstacked`, `grouped`, `stacked`, and `stacked100`.
+   - Invalid or unsupported layouts must fail compatibility analysis with a clear reason before rendering.

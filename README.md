@@ -82,6 +82,22 @@ $env:KUSTO_CONFIG_PATH = "C:\temp\kusto\config.json"
 - `markdown`: emits Mermaid chart syntax for compatible chart kinds after the markdown table
 - `json`: rejected, because terminal/markdown chart rendering doesn't apply to JSON output
 
+Supported render kinds:
+
+| Kusto `render` kind | `human --chart` | `markdown --chart` | Notes |
+|---|---|---|---|
+| `columnchart` | yes | yes | Human output renders a terminal column chart; markdown emits Mermaid `xychart`. |
+| `barchart` | yes | yes | Human output renders a terminal bar chart; markdown emits Mermaid `xychart horizontal`. |
+| `linechart` | yes | yes | Human output renders a terminal line chart; markdown emits Mermaid `xychart`. |
+| `timechart` | yes | yes | Alias of `linechart`. |
+| `piechart` | no | yes | Markdown-only; terminal output keeps the table and explains that pie charts are not supported there. |
+
+Layout support:
+
+- `linechart` and `timechart` support `default`/`unstacked`, `stacked`, and `stacked100` for terminal rendering
+- `columnchart` and `barchart` support `default`/`unstacked`, `grouped`, `stacked`, and `stacked100` for terminal rendering
+- Mermaid cartesian output currently requires the simple/default layout and exactly one series
+
 If a query returns visualization metadata but `--chart` is omitted, the CLI will hint when the result is compatible with terminal chart rendering. If a render kind or layout can't be mapped faithfully to Hex1b or Mermaid, the CLI will keep the table output and show an explanatory message instead.
 
 ## Schema cache
@@ -114,7 +130,7 @@ These options are available on all commands:
 | `database set-default <database>` | Set default database for a cluster. | `database` | `--cluster`, global options |
 | `table list` | List tables in a database. | none | `--cluster`, `--database`, `--filter`, `--take`, global options |
 | `table show <table>` | Show schema/details for one table. | `table` | `--cluster`, `--database`, global options |
-| `query [<query>]` | Run KQL from inline text, file, or stdin. | optional `query` | `--file`, `--cluster`, `--database`, `--show-stats`, global options |
+| `query [<query>]` | Run KQL from inline text, file, or stdin. | optional `query` | `--file`, `--cluster`, `--database`, `--chart`, `--show-stats`, global options |
 
 ## Command-specific option details
 
@@ -126,6 +142,7 @@ These options are available on all commands:
 | `--take <int>` | `database list`, `table list` | Limits number of rows returned. Alias: `--limit`. Must be a positive integer. |
 | `--use` | `cluster add` | Also set the added cluster as the active/default cluster. |
 | `--file <path>` | `query` | Read query text from file. Alias: `-f`. Cannot be combined with inline query argument. |
+| `--chart` | `query` | Render compatible query results as a chart for `human` or `markdown` output. Not supported with `json`. |
 | `--show-stats` | `query` | Include query execution statistics when Kusto returns them. |
 
 ## Optional aliases
@@ -221,6 +238,15 @@ StormEvents
 
 # Query with execution statistics when available
 kusto query "StormEvents | summarize Count=count() by State" --cluster help --database Samples --show-stats
+
+# Render a terminal bar chart
+kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render barchart" --cluster help --database Samples --chart
+
+# Render a terminal time series chart (`timechart` is an alias of `linechart`)
+kusto query "StormEvents | summarize Count=count() by bin(StartTime, 1d) | render timechart" --cluster help --database Samples --chart
+
+# Emit Mermaid pie chart output in markdown
+kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render piechart" --cluster help --database Samples --format markdown --chart
 ```
 
 ## Output formats
