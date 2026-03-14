@@ -14,8 +14,16 @@ internal static class Hex1bChartRenderer
     private const int ChartHeight = 24;
     private static readonly TimeSpan RenderTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RenderPollInterval = TimeSpan.FromMilliseconds(50);
+    private static readonly TerminalAnsiOptions AnsiOptions = new()
+    {
+        IncludeClearScreen = false,
+        IncludeCursorPosition = false,
+        IncludeTrailingNewline = false,
+        RenderNullAsSpace = true,
+        ResetAtEnd = true
+    };
 
-    public static async Task<string> RenderAsync(QueryChartDefinition chart, CancellationToken cancellationToken)
+    public static async Task<HumanChartRenderResult> RenderAsync(QueryChartDefinition chart, CancellationToken cancellationToken)
     {
         await using var terminal = Hex1bTerminal.CreateBuilder()
             .WithHeadless()
@@ -46,14 +54,14 @@ internal static class Hex1bChartRenderer
         }
     }
 
-    private static async Task<string> WaitForRenderedScreenAsync(
+    private static async Task<HumanChartRenderResult> WaitForRenderedScreenAsync(
         Hex1bTerminal terminal,
         QueryChartDefinition chart,
         Task runTask,
         CancellationToken cancellationToken)
     {
         var expectedTitle = chart.Title ?? "Chart";
-        string? lastRenderedScreen = null;
+        HumanChartRenderResult? lastRenderedChart = null;
         var stopwatch = Stopwatch.StartNew();
 
         while (stopwatch.Elapsed < RenderTimeout)
@@ -64,21 +72,21 @@ internal static class Hex1bChartRenderer
             }
 
             using var snapshot = terminal.CreateSnapshot();
-            var screenText = Normalize(snapshot.GetScreenText());
-            if (!string.IsNullOrWhiteSpace(screenText) &&
-                screenText.Contains(expectedTitle, StringComparison.Ordinal) &&
-                string.Equals(screenText, lastRenderedScreen, StringComparison.Ordinal))
+            var renderedChart = CaptureRenderedChart(snapshot);
+            if (!string.IsNullOrWhiteSpace(renderedChart.PlainText) &&
+                renderedChart.PlainText.Contains(expectedTitle, StringComparison.Ordinal) &&
+                string.Equals(renderedChart.PlainText, lastRenderedChart?.PlainText, StringComparison.Ordinal))
             {
-                return screenText;
+                return renderedChart;
             }
 
-            lastRenderedScreen = screenText;
+            lastRenderedChart = renderedChart;
             await Task.Delay(RenderPollInterval, cancellationToken);
         }
 
-        if (!string.IsNullOrWhiteSpace(lastRenderedScreen))
+        if (!string.IsNullOrWhiteSpace(lastRenderedChart?.PlainText))
         {
-            return lastRenderedScreen;
+            return lastRenderedChart!;
         }
 
         throw new InvalidOperationException("Timed out waiting for Hex1b to render the chart.");
@@ -219,6 +227,13 @@ internal static class Hex1bChartRenderer
         return items;
     }
 
+    private static HumanChartRenderResult CaptureRenderedChart(Hex1bTerminalSnapshot snapshot)
+    {
+        var plainText = Normalize(snapshot.GetScreenText());
+        var ansiText = snapshot.ToAnsi(AnsiOptions);
+        return new HumanChartRenderResult(plainText, ansiText);
+    }
+
     private static string Normalize(string screenText)
     {
         var lines = screenText.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
@@ -243,6 +258,5 @@ internal static class Hex1bChartRenderer
 
         return builder.ToString().TrimEnd();
     }
-
     private sealed record Hex1bChartRow(string Label, Dictionary<string, double> Values);
 }

@@ -551,6 +551,7 @@ public static class CommandFactory
                 string? chartHint = null;
                 string? chartMessage = null;
                 string? humanChart = null;
+                string? humanChartAnsi = null;
                 string? markdownChart = null;
                 if (result.Visualization is not null)
                 {
@@ -572,7 +573,9 @@ public static class CommandFactory
                         {
                             if (compatibility.HumanChart is not null)
                             {
-                                humanChart = await Hex1bChartRenderer.RenderAsync(compatibility.HumanChart, ct);
+                                var renderedChart = await Hex1bChartRenderer.RenderAsync(compatibility.HumanChart, ct);
+                                humanChart = renderedChart.PlainText;
+                                humanChartAnsi = renderedChart.AnsiText;
                             }
                             else
                             {
@@ -595,6 +598,7 @@ public static class CommandFactory
                     ChartHint = chartHint,
                     ChartMessage = chartMessage,
                     HumanChart = humanChart,
+                    HumanChartAnsi = humanChartAnsi,
                     MarkdownChart = markdownChart,
                     IsQueryResultTable = true
                 };

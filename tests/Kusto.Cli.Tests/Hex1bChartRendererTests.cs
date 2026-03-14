@@ -18,9 +18,9 @@ public sealed class Hex1bChartRendererTests
 
         var rendered = await Hex1bChartRenderer.RenderAsync(chart, CancellationToken.None);
 
-        Assert.Contains("Top states", rendered, StringComparison.Ordinal);
-        Assert.Contains("TEXAS", rendered, StringComparison.Ordinal);
-        Assert.Contains("KANSAS", rendered, StringComparison.Ordinal);
+        Assert.Contains("Top states", rendered.PlainText, StringComparison.Ordinal);
+        Assert.Contains("TEXAS", rendered.PlainText, StringComparison.Ordinal);
+        Assert.Contains("KANSAS", rendered.PlainText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -39,9 +39,11 @@ public sealed class Hex1bChartRendererTests
 
         var rendered = await Hex1bChartRenderer.RenderAsync(chart, CancellationToken.None);
 
-        Assert.Contains("Top states", rendered, StringComparison.Ordinal);
-        Assert.Contains("TEXAS", rendered, StringComparison.Ordinal);
-        Assert.Contains("KANSAS", rendered, StringComparison.Ordinal);
-        Assert.Contains("%", rendered, StringComparison.Ordinal);
+        Assert.Contains("Top states", rendered.PlainText, StringComparison.Ordinal);
+        Assert.Contains("TEXAS", rendered.PlainText, StringComparison.Ordinal);
+        Assert.Contains("KANSAS", rendered.PlainText, StringComparison.Ordinal);
+        Assert.Contains("%", rendered.PlainText, StringComparison.Ordinal);
+        Assert.Contains("\u001b[", rendered.AnsiText, StringComparison.Ordinal);
+        Assert.Contains("\u001b[48;2;", rendered.AnsiText, StringComparison.Ordinal);
     }
 }

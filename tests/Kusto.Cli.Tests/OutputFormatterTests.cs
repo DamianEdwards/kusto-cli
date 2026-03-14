@@ -202,6 +202,28 @@ public sealed class OutputFormatterTests
     }
 
     [Fact]
+    public void FormatHuman_QueryOutput_WithAnsiHumanChart_FallsBackToPlainChartWhenAnsiIsUnavailable()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(["State", "Count"], [["TEXAS", "60"]]),
+            Visualization = new QueryVisualization
+            {
+                Visualization = "piechart"
+            },
+            HumanChart = "Top states\nTEXAS 60 60%",
+            HumanChartAnsi = "\u001b[31mansi chart\u001b[0m"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Human);
+
+        Assert.Contains("Top states", rendered, StringComparison.Ordinal);
+        Assert.Contains("TEXAS 60 60%", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u001b[31m", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FormatJson_QueryOutput_WithVisualization_IncludesStructuredMetadata()
     {
         var formatter = new OutputFormatter();
