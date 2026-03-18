@@ -11,6 +11,24 @@ internal static class ConsoleRendering
     {
         return Environment.UserInteractive && !Console.IsErrorRedirected;
     }
+
+    public static int? TryGetStandardOutputWidth()
+    {
+        if (!ShouldUseAnsiForStandardOutput())
+        {
+            return null;
+        }
+
+        try
+        {
+            var width = Console.WindowWidth;
+            return width > 0 ? width : null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
 }
 
 internal static class ConsoleStyle

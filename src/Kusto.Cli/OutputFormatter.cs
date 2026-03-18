@@ -1,8 +1,6 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
-using Spectre.Console;
-using Spectre.Console.Rendering;
 
 namespace Kusto.Cli;
 
@@ -20,100 +18,30 @@ public sealed class OutputFormatter : IOutputFormatter
 
     private static string FormatHuman(CliOutput output)
     {
-        using var writer = new StringWriter();
         var useAnsi = ConsoleRendering.ShouldUseAnsiForStandardOutput();
-        var console = AnsiConsole.Create(new AnsiConsoleSettings
+        var availableWidth = ConsoleRendering.TryGetStandardOutputWidth();
+        var leadingText = BuildHumanTextOutput(output, availableWidth);
+        var sections = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(leadingText))
         {
-            Out = new AnsiConsoleOutput(writer),
-            Ansi = useAnsi ? AnsiSupport.Yes : AnsiSupport.No,
-            ColorSystem = useAnsi ? ColorSystemSupport.Detect : ColorSystemSupport.NoColors,
-            Interactive = useAnsi ? InteractionSupport.Yes : InteractionSupport.No
-        });
-
-        var wroteSection = false;
-        if (!string.IsNullOrWhiteSpace(output.Message))
-        {
-            console.MarkupLine(Markup.Escape(output.Message));
-            wroteSection = true;
-        }
-
-        var displayProperties = BuildDisplayProperties(output);
-        if (displayProperties.Count > 0)
-        {
-            if (wroteSection)
-            {
-                console.WriteLine();
-            }
-
-            console.Write(CreatePropertiesTable(displayProperties));
-            wroteSection = true;
-        }
-
-        if (output.Statistics is not null)
-        {
-            var statisticsProperties = FlattenStatistics(output.Statistics);
-            if (statisticsProperties.Count > 0)
-            {
-                if (wroteSection)
-                {
-                    console.WriteLine();
-                }
-
-                console.MarkupLine("Statistics");
-                console.Write(CreatePropertiesTable(statisticsProperties));
-                wroteSection = true;
-            }
-        }
-
-        if (output.Table is not null)
-        {
-            if (wroteSection)
-            {
-                console.WriteLine();
-            }
-
-            var table = CreateDataTable(output.Table, output.IsQueryResultTable, useAnsi);
-
-            console.Write(table);
-            wroteSection = true;
-        }
-
-        if (output.Visualization is not null)
-        {
-            if (wroteSection)
-            {
-                console.WriteLine();
-            }
-
-            WriteVisualizationSection(console, output.Visualization, output.ChartHint, output.ChartMessage);
-            wroteSection = true;
+            sections.Add(Hex1bHumanRenderer.RenderText(leadingText));
         }
 
         if (!string.IsNullOrWhiteSpace(output.HumanChart))
         {
-            if (wroteSection)
-            {
-                console.WriteLine();
-            }
-
             var selectedChart = useAnsi && !string.IsNullOrWhiteSpace(output.HumanChartAnsi)
                 ? output.HumanChartAnsi
                 : output.HumanChart;
-            writer.Write(selectedChart);
-            wroteSection = true;
+            sections.Add(selectedChart);
         }
 
         if (!string.IsNullOrWhiteSpace(output.WebExplorerUrl))
         {
-            if (wroteSection)
-            {
-                console.WriteLine();
-            }
-
-            WriteWebExplorerLink(console, output.WebExplorerUrl, useAnsi);
+            sections.Add(Hex1bHumanRenderer.RenderHyperlink("Open in Web Explorer", output.WebExplorerUrl, useAnsi));
         }
 
-        return writer.ToString().TrimEnd();
+        return string.Join(Environment.NewLine + Environment.NewLine, sections.Where(section => !string.IsNullOrWhiteSpace(section))).TrimEnd();
     }
 
     private static string FormatMarkdown(CliOutput output)
@@ -190,22 +118,6 @@ public sealed class OutputFormatter : IOutputFormatter
         }
 
         return buffer.ToString().TrimEnd();
-    }
-
-    private static Table CreatePropertiesTable(IReadOnlyDictionary<string, string?> properties)
-    {
-        var propertiesTable = new Table().Border(TableBorder.Rounded).Expand();
-        propertiesTable.AddColumn(new TableColumn("Property"));
-        propertiesTable.AddColumn(new TableColumn("Value"));
-
-        foreach (var pair in properties.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
-        {
-            propertiesTable.AddRow(
-                Markup.Escape(pair.Key),
-                Markup.Escape(pair.Value ?? string.Empty));
-        }
-
-        return propertiesTable;
     }
 
     private static Dictionary<string, string?> BuildDisplayProperties(CliOutput output)
@@ -318,26 +230,115 @@ public sealed class OutputFormatter : IOutputFormatter
         }
     }
 
-    private static void WriteVisualizationSection(IAnsiConsole console, QueryVisualization visualization, string? chartHint, string? chartMessage)
+    private static string BuildHumanTextOutput(CliOutput output, int? availableWidth)
     {
-        var name = visualization.Visualization ?? "visualization";
-        console.MarkupLine($"Render requested: {Markup.Escape(name)}");
+        var buffer = new StringBuilder();
+
+        if (!string.IsNullOrWhiteSpace(output.Message))
+        {
+            AppendHumanSection(buffer, output.Message);
+        }
+
+        var displayProperties = BuildDisplayProperties(output);
+        if (displayProperties.Count > 0)
+        {
+            AppendHumanSection(buffer, Hex1bHumanRenderer.FormatKeyValueTable(displayProperties, availableWidth));
+        }
+
+        if (output.Statistics is not null)
+        {
+            var statisticsProperties = FlattenStatistics(output.Statistics);
+            if (statisticsProperties.Count > 0)
+            {
+                AppendHumanSection(buffer, FormatStatisticsSection(statisticsProperties, availableWidth));
+            }
+        }
+
+        if (output.Table is not null)
+        {
+            AppendHumanSection(buffer, Hex1bHumanRenderer.FormatDataTable(output.Table, output.IsQueryResultTable, availableWidth));
+        }
+
+        if (output.Visualization is not null)
+        {
+            AppendHumanSection(buffer, FormatHumanVisualizationSection(output.Visualization, output.ChartHint, output.ChartMessage, availableWidth));
+        }
+
+        return buffer.ToString().TrimEnd();
+    }
+
+    private static string FormatStatisticsSection(IReadOnlyDictionary<string, string?> statisticsProperties, int? availableWidth)
+    {
+        var buffer = new StringBuilder();
+        buffer.AppendLine("Statistics");
+        buffer.AppendLine();
+        buffer.Append(Hex1bHumanRenderer.FormatKeyValueTable(statisticsProperties, availableWidth));
+        return buffer.ToString().TrimEnd();
+    }
+
+    private static string FormatHumanVisualizationSection(QueryVisualization visualization, string? chartHint, string? chartMessage, int? availableWidth)
+    {
+        var buffer = new StringBuilder();
+        buffer.AppendLine($"Render requested: {visualization.Visualization ?? "visualization"}");
 
         var properties = BuildVisualizationProperties(visualization);
-        foreach (var pair in properties.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+        if (properties.Count > 0)
         {
-            console.MarkupLine($"  [grey]{Markup.Escape(pair.Key)}:[/] {Markup.Escape(pair.Value ?? string.Empty)}");
+            buffer.AppendLine();
+            buffer.Append(Hex1bHumanRenderer.FormatKeyValueTable(properties, availableWidth));
         }
 
         if (!string.IsNullOrWhiteSpace(chartHint))
         {
-            console.MarkupLine(Markup.Escape(chartHint));
+            buffer.AppendLine();
+            buffer.Append(chartHint);
         }
 
         if (!string.IsNullOrWhiteSpace(chartMessage))
         {
-            console.MarkupLine(Markup.Escape(chartMessage));
+            buffer.AppendLine();
+            buffer.Append(chartMessage);
         }
+
+        return buffer.ToString().TrimEnd();
+    }
+
+    private static string? FormatNumber(double? value)
+    {
+        return value?.ToString("0.##", CultureInfo.InvariantCulture);
+    }
+
+    private static string? FormatNumber(int? value)
+    {
+        return value?.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static string EscapeMarkdown(string value)
+    {
+        return value.Replace("|", "\\|", StringComparison.Ordinal);
+    }
+
+    private static string? Join(IReadOnlyList<string>? values)
+    {
+        return values is { Count: > 0 }
+            ? string.Join(", ", values)
+            : null;
+    }
+
+    private static void AppendHumanSection(StringBuilder buffer, string section)
+    {
+        if (string.IsNullOrWhiteSpace(section))
+        {
+            return;
+        }
+
+        if (buffer.Length > 0)
+        {
+            buffer.AppendLine();
+            buffer.AppendLine();
+        }
+
+        buffer.Append(section.TrimEnd());
     }
 
     private static void AppendVisualizationSection(StringBuilder buffer, QueryVisualization visualization, string? chartHint, string? chartMessage)
@@ -364,118 +365,5 @@ public sealed class OutputFormatter : IOutputFormatter
         {
             buffer.AppendLine(chartMessage);
         }
-    }
-
-    private static string? FormatNumber(double? value)
-    {
-        return value?.ToString("0.##", CultureInfo.InvariantCulture);
-    }
-
-    private static string? FormatNumber(int? value)
-    {
-        return value?.ToString(CultureInfo.InvariantCulture);
-    }
-
-    private static string EscapeMarkdown(string value)
-    {
-        return value.Replace("|", "\\|", StringComparison.Ordinal);
-    }
-
-    private static string? Join(IReadOnlyList<string>? values)
-    {
-        return values is { Count: > 0 }
-            ? string.Join(", ", values)
-            : null;
-    }
-
-    private static void WriteWebExplorerLink(IAnsiConsole console, string url, bool useAnsi)
-    {
-        if (useAnsi)
-        {
-            console.MarkupLine($"[link={Markup.Escape(url)}]Open in Web Explorer[/]");
-            return;
-        }
-
-        console.MarkupLine($"Open in Web Explorer: {Markup.Escape(url)}");
-    }
-
-    private static Table CreateDataTable(TabularData data, bool isQueryResultTable, bool useAnsi)
-    {
-        var table = new Table
-        {
-            Border = isQueryResultTable ? TableBorder.MinimalHeavyHead : TableBorder.Rounded,
-            Expand = !isQueryResultTable,
-            ShowRowSeparators = isQueryResultTable,
-            UseSafeBorder = !useAnsi
-        };
-
-        if (data.Columns.Count == 0)
-        {
-            table.AddColumn(new TableColumn("Value"));
-            foreach (var row in data.Rows)
-            {
-                table.AddRow(Markup.Escape(string.Join(", ", row.Select(value => value ?? string.Empty))));
-            }
-
-            return table;
-        }
-
-        var rightAlignedColumns = new bool[data.Columns.Count];
-        for (var i = 0; i < data.Columns.Count; i++)
-        {
-            var column = new TableColumn(Markup.Escape(data.Columns[i]));
-            if (isQueryResultTable && ShouldRightAlignColumn(data, i))
-            {
-                rightAlignedColumns[i] = true;
-            }
-
-            table.AddColumn(column);
-        }
-
-        foreach (var row in data.Rows)
-        {
-            var rowCells = new IRenderable[data.Columns.Count];
-            for (var i = 0; i < data.Columns.Count; i++)
-            {
-                var value = i < row.Count ? row[i] : string.Empty;
-                IRenderable renderedCell = new Markup(Markup.Escape(value ?? string.Empty));
-                if (isQueryResultTable && rightAlignedColumns[i])
-                {
-                    renderedCell = Align.Right(renderedCell);
-                }
-
-                rowCells[i] = renderedCell;
-            }
-
-            table.AddRow(rowCells);
-        }
-
-        return table;
-    }
-
-    private static bool ShouldRightAlignColumn(TabularData data, int columnIndex)
-    {
-        var hasValue = false;
-        foreach (var row in data.Rows)
-        {
-            if (columnIndex >= row.Count)
-            {
-                continue;
-            }
-
-            var value = row[columnIndex];
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                continue;
-            }
-
-            hasValue = true;
-            if (!decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out _))
-            {
-                return false;
-            }
-        }
-
-        return hasValue;
     }
 }
