@@ -41,7 +41,7 @@ There is no separate lint command configured in this repository.
 - Request payloads and output JSON use source-generated serializers (`src/Kusto.Cli/KustoJsonSerializerContext.cs`) for AOT-safe serialization.
 
 ### 5) Output and logging pipeline
-- `src/Kusto.Cli/OutputFormatter.cs` supports `human`, `json`, and `markdown` output; human output uses `Spectre.Console` tables.
+- `src/Kusto.Cli/OutputFormatter.cs` supports `human`, `json`, and `markdown` output; human output now uses Hex1b-backed rendering plus text-table formatting for static terminal output.
 - Query result tables are flagged with `CliOutput.IsQueryResultTable` for query-specific table styling/alignment.
 - `src/Kusto.Cli/Logging.cs` configures always-on file logging (`%TEMP%\kusto\kusto.log`) and optional stderr logging when `--log-level` is explicitly set.
 - `src/Kusto.Cli/KustoConsoleFormatter.cs` and `src/Kusto.Cli/ConsoleStyling.cs` apply console styling (light-gray logs, red errors, ANSI-aware behavior).

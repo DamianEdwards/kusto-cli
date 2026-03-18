@@ -224,6 +224,20 @@ public sealed class OutputFormatterTests
     }
 
     [Fact]
+    public void FormatHuman_MessageOutput_PreservesWideUnicodeCharacters()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Message = "abc漢字"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Human);
+
+        Assert.Equal("abc漢字", rendered);
+    }
+
+    [Fact]
     public void FormatJson_QueryOutput_WithVisualization_IncludesStructuredMetadata()
     {
         var formatter = new OutputFormatter();
