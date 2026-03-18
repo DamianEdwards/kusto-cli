@@ -202,6 +202,18 @@ jobs:
           exclude-azure-developer-cli-credential: true
           exclude-interactive-browser-credential: true
 
+      - name: Verify signed Windows issuer
+        shell: pwsh
+        run: |
+          $binaryPaths = @(Get-ChildItem -Path './artifacts/windows-assets' -Recurse -Filter 'kusto.exe' -File)
+          if ($binaryPaths.Count -eq 0) {
+            throw "No signed kusto.exe files were found under './artifacts/windows-assets'."
+          }
+
+          foreach ($binaryPath in $binaryPaths) {
+            ./scripts/Verify-WindowsBinaryIssuer.ps1 -BinaryPath $binaryPath.FullName -InstallerScriptPath './scripts/install/install-kusto-cli.ps1'
+          }
+
       - name: Repack signed Windows assets
         shell: pwsh
         run: ./scripts/Compress-WindowsReleaseAssets.ps1 -WorkingDirectory './artifacts/windows-assets' -OutputDirectory './artifacts/signed-windows-assets'

@@ -16,6 +16,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Keep this single-sourced here; the release workflow reads this value from the installer script.
+$ExpectedSignerIssuerSha512Thumbprint = '1770433e5d2c028e0bf8640a0345bdb86307e7cc2a99cfbe93acf9d960a996d1c63b2d5cf30d52e7741df4fd057ea778442f75c1b62ee2106c66333078a04e6d'
+
 $runningOnWindows = if (Get-Variable -Name IsWindows -ErrorAction SilentlyContinue)
 {
     [bool]$IsWindows
@@ -280,7 +283,23 @@ function Get-ExpectedSha256
     return $match.Groups[1].Value.ToLowerInvariant()
 }
 
-function Assert-CertificateChain
+function Get-CertificateSha512Thumbprint
+{
+    param([Parameter(Mandatory)][System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate)
+
+    $sha512 = [System.Security.Cryptography.SHA512]::Create()
+    try
+    {
+        $hashBytes = $sha512.ComputeHash($Certificate.RawData)
+        return ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
+    }
+    finally
+    {
+        $sha512.Dispose()
+    }
+}
+
+function Get-ValidatedCertificateChain
 {
     param(
         [Parameter(Mandatory)][System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate,
@@ -304,7 +323,7 @@ function Assert-CertificateChain
     $ok = $chain.Build($Certificate)
     if ($ok)
     {
-        return
+        return $chain
     }
 
     $statuses = @($chain.ChainStatus |
@@ -332,6 +351,32 @@ function Assert-CertificateChain
     }
 
     throw "$Description certificate chain validation failed: $statusMessage"
+}
+
+function Assert-ImmediateIssuerSha512Thumbprint
+{
+    param(
+        [Parameter(Mandatory)][System.Security.Cryptography.X509Certificates.X509Chain]$Chain,
+        [Parameter(Mandatory)][string]$Description,
+        [Parameter(Mandatory)][string]$ExpectedSha512Thumbprint
+    )
+
+    if ($Chain.ChainElements.Count -lt 2)
+    {
+        throw "$Description certificate chain did not include an issuing certificate."
+    }
+
+    $issuerCertificate = $Chain.ChainElements[1].Certificate
+    if ($null -eq $issuerCertificate)
+    {
+        throw "$Description certificate chain did not provide an issuing certificate."
+    }
+
+    $actualThumbprint = Get-CertificateSha512Thumbprint -Certificate $issuerCertificate
+    if (-not [string]::Equals($actualThumbprint, $ExpectedSha512Thumbprint, [System.StringComparison]::OrdinalIgnoreCase))
+    {
+        throw "$Description issuer certificate '$($issuerCertificate.Subject)' has SHA512 thumbprint '$actualThumbprint', expected '$ExpectedSha512Thumbprint'."
+    }
 }
 
 function Normalize-DistinguishedNameKey
@@ -382,7 +427,8 @@ function Assert-WindowsBinaryTrust
 {
     param(
         [Parameter(Mandatory)][string]$BinaryPath,
-        [Parameter(Mandatory)][string]$ExpectedSubject
+        [Parameter(Mandatory)][string]$ExpectedSubject,
+        [Parameter(Mandatory)][string]$ExpectedIssuerSha512Thumbprint
     )
 
     $signature = Get-AuthenticodeSignature -FilePath $BinaryPath
@@ -415,14 +461,15 @@ function Assert-WindowsBinaryTrust
         }
     }
 
-    Assert-CertificateChain -Certificate $signature.SignerCertificate -Description 'Signer' -IgnoreTimeValidity
+    $signerChain = Get-ValidatedCertificateChain -Certificate $signature.SignerCertificate -Description 'Signer' -IgnoreTimeValidity
+    Assert-ImmediateIssuerSha512Thumbprint -Chain $signerChain -Description 'Signer' -ExpectedSha512Thumbprint $ExpectedIssuerSha512Thumbprint
 
     if ($null -eq $signature.TimeStamperCertificate)
     {
         throw "Expected a timestamped signature for '$BinaryPath', but no timestamp certificate was present."
     }
 
-    Assert-CertificateChain -Certificate $signature.TimeStamperCertificate -Description 'Timestamp'
+    $null = Get-ValidatedCertificateChain -Certificate $signature.TimeStamperCertificate -Description 'Timestamp'
 }
 
 function Get-KustoVersionString
@@ -664,7 +711,7 @@ try
 
     if ($Quality -ne 'Dev')
     {
-        Assert-WindowsBinaryTrust -BinaryPath $downloadedBinaryPath -ExpectedSubject $ExpectedSignerSubject
+        Assert-WindowsBinaryTrust -BinaryPath $downloadedBinaryPath -ExpectedSubject $ExpectedSignerSubject -ExpectedIssuerSha512Thumbprint $ExpectedSignerIssuerSha512Thumbprint
     }
 
     $installDirectory = [System.IO.Path]::GetFullPath($TargetPath)
