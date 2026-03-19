@@ -26,12 +26,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
         with:
           dotnet-version: '10.0.x'
 
@@ -138,7 +138,7 @@ jobs:
           fi
 
       - name: Upload unsigned release bundle
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: release-unsigned-bundle
           path: ./artifacts/*
@@ -155,10 +155,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Download unsigned release bundle
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: release-unsigned-bundle
           path: ./artifacts/bundle
@@ -168,19 +168,19 @@ jobs:
         run: ./scripts/Expand-WindowsReleaseAssets.ps1 -BundleDirectory './artifacts/bundle' -WorkingDirectory './artifacts/windows-assets'
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
         with:
           dotnet-version: '10.0.x'
 
       - name: Azure login
-        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign Windows executables
-        uses: azure/artifact-signing-action@db7a3a6bd3912025c705162fb7475389f5b69ec6
+        uses: azure/artifact-signing-action@87c2e83e6868da99d3380aa309851b32ed9a8346
         with:
           endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
           signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
@@ -219,7 +219,7 @@ jobs:
         run: ./scripts/Compress-WindowsReleaseAssets.ps1 -WorkingDirectory './artifacts/windows-assets' -OutputDirectory './artifacts/signed-windows-assets'
 
       - name: Upload signed Windows assets
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: release-signed-windows-assets
           path: ./artifacts/signed-windows-assets/*
@@ -235,21 +235,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
         with:
           dotnet-version: '10.0.x'
 
       - name: Download unsigned release bundle
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: release-unsigned-bundle
           path: ./artifacts/release
 
       - name: Download signed Windows assets
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: release-signed-windows-assets
           path: ./artifacts/signed-windows-assets
