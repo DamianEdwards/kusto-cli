@@ -20,7 +20,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # Keep this single-sourced here; the release workflow reads this value from the installer script.
-$ExpectedSignerIssuerSha512Thumbprint = '1770433e5d2c028e0bf8640a0345bdb86307e7cc2a99cfbe93acf9d960a996d1c63b2d5cf30d52e7741df4fd057ea778442f75c1b62ee2106c66333078a04e6d'
+$ExpectedSignerIssuerSha512Thumbprint = '1c93dcf4e032b19949a67722d0c25e683309fbcd36110da84129f45d8175b709ebc6ef3439596ece9eb8f2dae1967b856adc49ba74535244a8a5db5fb48fa7b9'
 
 $runningOnWindows = if (Get-Variable -Name IsWindows -ErrorAction SilentlyContinue)
 {
