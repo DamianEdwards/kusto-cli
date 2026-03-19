@@ -135,7 +135,7 @@ if ($null -eq $issuerCertificate)
 }
 
 $actualThumbprint = Get-CertificateSha512Thumbprint -Certificate $issuerCertificate
-if (-not [string]::Equals($actualThumbprint, $expectedThumbprint, [System.StringComparison]::OrdinalIgnoreCase))
+if (-not [string]::Equals($actualThumbprint, $expectedThumbprint, [System.StringComparison]::Ordinal))
 {
     throw "Signer issuer certificate for '$binaryPath' changed. Expected SHA512 '$expectedThumbprint' from '$installerScriptPath', but found '$actualThumbprint' on issuer '$($issuerCertificate.Subject)'. If this rotation is intentional, update '$installerScriptPath' to use the new SHA512 thumbprint '$actualThumbprint'."
 }

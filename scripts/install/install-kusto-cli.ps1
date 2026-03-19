@@ -373,7 +373,7 @@ function Assert-ImmediateIssuerSha512Thumbprint
     }
 
     $actualThumbprint = Get-CertificateSha512Thumbprint -Certificate $issuerCertificate
-    if (-not [string]::Equals($actualThumbprint, $ExpectedSha512Thumbprint, [System.StringComparison]::OrdinalIgnoreCase))
+    if (-not [string]::Equals($actualThumbprint, $ExpectedSha512Thumbprint, [System.StringComparison]::Ordinal))
     {
         throw "$Description issuer certificate '$($issuerCertificate.Subject)' has SHA512 thumbprint '$actualThumbprint', expected '$ExpectedSha512Thumbprint'."
     }
