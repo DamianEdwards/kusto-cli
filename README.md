@@ -394,9 +394,71 @@ Installer behavior:
 - Supports `-Quality Dev|PreRelease|Stable` (default: `Stable`)
 - Supports `-TargetPath` (default: `%USERPROFILE%\.kusto\bin`)
 - Supports `-UpdatePath` (default: `true`)
+- Prints concise progress messages by default during download, verification, and install
+- Supports `-Verbose` for opt-in download and provenance diagnostics
 - Replaces existing `kusto.exe` only when the downloaded version is newer
 - Updates current-session and user PATH to include the target directory when `-UpdatePath` is `true`
 - On non-Windows PowerShell, exits with a clear "not yet supported" message
+
+### Manually verify Windows provenance checks
+
+The installer's Windows provenance logic has two supporting scripts:
+
+- `scripts/Verify-WindowsBinaryIssuer.ps1` reuses the installer's trust helpers and verifies signature validity, certificate-chain/timestamp validity, and the installer's configured issuer thumbprint.
+- `scripts/Test-InstallerProvenance.ps1` stages positive and negative scenarios so you can make the trust checks fail on demand and inspect them with `-Verbose`.
+
+Use a signed `kusto.exe` from a release when you want to validate the installer's actual expected subject and issuer configuration:
+
+```powershell
+pwsh .\scripts\Verify-WindowsBinaryIssuer.ps1 -BinaryPath .\artifacts\signed\kusto.exe -Verbose
+pwsh .\scripts\Test-InstallerProvenance.ps1 -Scenario InstallerDefaults -BinaryPath .\artifacts\signed\kusto.exe -Verbose
+```
+
+To create an unsigned local Windows bundle that exercises the checksum, metadata, and unsigned-binary failure paths:
+
+```powershell
+Remove-Item .\artifacts\local-release, .\artifacts\local-bundle -Recurse -Force -ErrorAction SilentlyContinue
+pwsh .\scripts\Publish-NativeAsset.ps1 -RuntimeIdentifier win-x64 -Version 0.1.0-local -ArtifactsDirectory .\artifacts\local-release
+Get-ChildItem .\artifacts\local-release
+pwsh .\scripts\Merge-ReleaseBundle.ps1 -InputDirectory .\artifacts\local-release -OutputDirectory .\artifacts\local-bundle -Version 0.1.0-local
+Get-ChildItem .\artifacts\local-bundle
+Expand-Archive -Path .\artifacts\local-bundle\kusto-win-x64.zip -DestinationPath .\artifacts\local-bundle\extract -Force
+```
+
+After `Publish-NativeAsset`, `.\artifacts\local-release` should contain `kusto-win-x64.zip`, `kusto-win-x64.zip.sha256`, and `kusto-win-x64.json`.
+
+After `Merge-ReleaseBundle`, `.\artifacts\local-bundle` should contain `kusto-win-x64.zip`, `checksums.txt`, and `release-metadata.json`. An `extract` directory on its own is just a previous expansion target; it does not mean the bundle zip was created.
+
+Then run the staged failure scenarios:
+
+```powershell
+pwsh .\scripts\Test-InstallerProvenance.ps1 -Scenario UnsignedBinary -BinaryPath .\artifacts\local-bundle\extract\kusto.exe -Verbose
+pwsh .\scripts\Test-InstallerProvenance.ps1 -Scenario ChecksumMismatch -ArchivePath .\artifacts\local-bundle\kusto-win-x64.zip -ChecksumsPath .\artifacts\local-bundle\checksums.txt -Verbose
+pwsh .\scripts\Test-InstallerProvenance.ps1 -Scenario MetadataMismatch -ArchivePath .\artifacts\local-bundle\kusto-win-x64.zip -ChecksumsPath .\artifacts\local-bundle\checksums.txt -ReleaseMetadataPath .\artifacts\local-bundle\release-metadata.json -Verbose
+```
+
+For generic signature-path exercises, you can use any signed Windows executable. For example, `pwsh.exe` is convenient for validating the positive path and forced subject/thumbprint/signature failures:
+
+```powershell
+$pwshPath = (Get-Command pwsh).Source
+pwsh .\scripts\Test-InstallerProvenance.ps1 -Scenario GoodBinary -BinaryPath $pwshPath -Verbose
+pwsh .\scripts\Test-InstallerProvenance.ps1 -Scenario TamperedBinary -BinaryPath $pwshPath -Verbose
+pwsh .\scripts\Test-InstallerProvenance.ps1 -Scenario WrongSubject -BinaryPath $pwshPath -Verbose
+pwsh .\scripts\Test-InstallerProvenance.ps1 -Scenario WrongIssuer -BinaryPath $pwshPath -Verbose
+```
+
+Expected outcomes by scenario:
+
+- `InstallerDefaults` succeeds only when the binary matches the installer's configured signer subject and issuer thumbprint.
+- `GoodBinary` succeeds for a valid signed Windows executable when the expected values are taken from that binary.
+- `UnsignedBinary` fails with an Authenticode signature validation error.
+- `TamperedBinary` fails with an Authenticode signature validation error after a single-byte mutation invalidates the signature.
+- `WrongSubject` fails with a signer-subject mismatch.
+- `WrongIssuer` fails with an issuer-thumbprint mismatch.
+- `ChecksumMismatch` fails with a `SHA256 mismatch` error.
+- `MetadataMismatch` fails because `release-metadata.json` no longer matches `checksums.txt`.
+
+The harder timestamp or certificate-chain failure cases still need a lab-signed binary or another controlled fixture, but the verbose output from these scripts shows the exact signer, issuer, timestamp, chain elements, and thumbprints involved in each decision.
 
 ## Build and test
 

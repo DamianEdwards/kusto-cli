@@ -11,7 +11,10 @@ param(
 
     [string]$Repository = 'DamianEdwards/kusto-cli',
 
-    [string]$ExpectedSignerSubject = 'CN=Damian Edwards, O=Damian Edwards, L=Issaquah, S=Washington, C=US'
+    [string]$ExpectedSignerSubject = 'CN=Damian Edwards, O=Damian Edwards, L=Issaquah, S=Washington, C=US',
+
+    [Parameter(DontShow = $true)]
+    [switch]$NoExecute
 )
 
 $ErrorActionPreference = 'Stop'
@@ -283,6 +286,14 @@ function Get-ExpectedSha256
     return $match.Groups[1].Value.ToLowerInvariant()
 }
 
+function Get-KustoInstallerTrustConfiguration
+{
+    return [pscustomobject]@{
+        ExpectedSignerSubject = $ExpectedSignerSubject
+        ExpectedSignerIssuerSha512Thumbprint = $ExpectedSignerIssuerSha512Thumbprint
+    }
+}
+
 function Get-CertificateSha512Thumbprint
 {
     param([Parameter(Mandatory)][System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate)
@@ -299,6 +310,180 @@ function Get-CertificateSha512Thumbprint
     }
 }
 
+function Get-ChainStatusMessages
+{
+    param([Parameter(Mandatory)][System.Security.Cryptography.X509Certificates.X509Chain]$Chain)
+
+    return @($Chain.ChainStatus |
+            Where-Object { $_.Status -ne [System.Security.Cryptography.X509Certificates.X509ChainStatusFlags]::NoError } |
+            ForEach-Object {
+                $statusText = $_.Status.ToString()
+                $infoText = $_.StatusInformation.Trim()
+                if ([string]::IsNullOrWhiteSpace($infoText))
+                {
+                    $statusText
+                }
+                else
+                {
+                    "$statusText ($infoText)"
+                }
+            })
+}
+
+function Write-CertificateDetailsVerbose
+{
+    param(
+        [Parameter(Mandatory)][string]$Description,
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
+    )
+
+    if ($null -eq $Certificate)
+    {
+        Write-Verbose "$Description certificate: <null>"
+        return
+    }
+
+    Write-Verbose ("{0} certificate: Subject='{1}', Issuer='{2}', Thumbprint='{3}', NotBefore='{4:O}', NotAfter='{5:O}'" -f `
+            $Description, `
+            $Certificate.Subject, `
+            $Certificate.Issuer, `
+            $Certificate.Thumbprint, `
+            $Certificate.NotBefore, `
+            $Certificate.NotAfter)
+}
+
+function Write-CertificateChainVerbose
+{
+    param(
+        [Parameter(Mandatory)][System.Security.Cryptography.X509Certificates.X509Chain]$Chain,
+        [Parameter(Mandatory)][string]$Description
+    )
+
+    Write-Verbose "$Description certificate chain contains $($Chain.ChainElements.Count) element(s)."
+
+    for ($index = 0; $index -lt $Chain.ChainElements.Count; $index++)
+    {
+        Write-CertificateDetailsVerbose -Description "$Description chain[$index]" -Certificate $Chain.ChainElements[$index].Certificate
+    }
+
+    $statuses = Get-ChainStatusMessages -Chain $Chain
+    if ($statuses.Count -eq 0)
+    {
+        Write-Verbose "$Description certificate chain status: NoError."
+        return
+    }
+
+    foreach ($status in $statuses)
+    {
+        Write-Verbose "$Description certificate chain status: $status"
+    }
+}
+
+function Assert-WindowsArchiveIntegrity
+{
+    param(
+        [Parameter(Mandatory)][string]$ArchivePath,
+        [Parameter(Mandatory)][string]$AssetName,
+        [Parameter(Mandatory)][string]$ChecksumsPath,
+        [string]$ReleaseMetadataPath
+    )
+
+    Write-Verbose "Validating archive SHA256 for '$AssetName' using '$ChecksumsPath'."
+    $expectedSha = Get-ExpectedSha256 -ChecksumsPath $ChecksumsPath -AssetName $AssetName
+    $actualSha = (Get-FileHash -Path $ArchivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Write-Verbose "checksums.txt expected SHA256 for '$AssetName': '$expectedSha'."
+    Write-Verbose "Actual SHA256 for '$ArchivePath': '$actualSha'."
+
+    if ($expectedSha -ne $actualSha)
+    {
+        throw "SHA256 mismatch for '$AssetName'. Expected '$expectedSha' but got '$actualSha'."
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ReleaseMetadataPath))
+    {
+        Write-Verbose "Validating release metadata for '$AssetName' using '$ReleaseMetadataPath'."
+        $metadata = Get-Content -Path $ReleaseMetadataPath -Raw | ConvertFrom-Json
+        $metadataAsset = $metadata.assets | Where-Object { $_.name -eq $AssetName } | Select-Object -First 1
+        if ($null -eq $metadataAsset)
+        {
+            throw "release-metadata.json did not contain asset '$AssetName'."
+        }
+
+        $metadataSha = $metadataAsset.sha256.ToLowerInvariant()
+        Write-Verbose "release-metadata.json SHA256 for '$AssetName': '$metadataSha'."
+        if ($metadataSha -ne $expectedSha)
+        {
+            throw "release-metadata.json SHA256 for '$AssetName' did not match checksums.txt."
+        }
+    }
+
+    return $actualSha
+}
+
+function Expand-WindowsReleaseArchive
+{
+    param(
+        [Parameter(Mandatory)][string]$ArchivePath,
+        [Parameter(Mandatory)][string]$DestinationPath
+    )
+
+    Write-Verbose "Expanding '$ArchivePath' to '$DestinationPath'."
+    Expand-Archive -Path $ArchivePath -DestinationPath $DestinationPath -Force
+
+    $binaryPath = Join-Path $DestinationPath 'kusto.exe'
+    if (-not (Test-Path $binaryPath))
+    {
+        throw "Downloaded archive '$([System.IO.Path]::GetFileName($ArchivePath))' did not contain 'kusto.exe'."
+    }
+
+    Write-Verbose "Found extracted Windows binary '$binaryPath'."
+    return $binaryPath
+}
+
+function Invoke-StatusStep
+{
+    param(
+        [Parameter(Mandatory)][string]$Message,
+        [Parameter(Mandatory)][scriptblock]$Action
+    )
+
+    Write-Host "$Message... " -NoNewline
+    & $Action
+    Write-Host 'done'
+}
+
+function Get-ReleaseStatusLabel
+{
+    param(
+        [Parameter(Mandatory)][string]$SelectedQuality,
+        [Parameter(Mandatory)]$Release
+    )
+
+    $releaseLabel =
+        switch ($SelectedQuality)
+        {
+            'Stable' { 'latest stable release' }
+            'PreRelease' { 'latest prerelease' }
+            'Dev' { 'latest development build' }
+            default { 'release' }
+        }
+
+    $releaseVersion = if (-not [string]::IsNullOrWhiteSpace($Release.tag_name))
+    {
+        $Release.tag_name
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($Release.name))
+    {
+        $Release.name
+    }
+    else
+    {
+        'unknown version'
+    }
+
+    return "$releaseLabel ($releaseVersion)"
+}
+
 function Get-ValidatedCertificateChain
 {
     param(
@@ -306,6 +491,9 @@ function Get-ValidatedCertificateChain
         [Parameter(Mandatory)][string]$Description,
         [switch]$IgnoreTimeValidity
     )
+
+    Write-CertificateDetailsVerbose -Description $Description -Certificate $Certificate
+    Write-Verbose "Building $Description certificate chain. IgnoreTimeValidity=$IgnoreTimeValidity."
 
     $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
     $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::Online
@@ -323,24 +511,12 @@ function Get-ValidatedCertificateChain
     $ok = $chain.Build($Certificate)
     if ($ok)
     {
+        Write-CertificateChainVerbose -Chain $chain -Description $Description
         return $chain
     }
 
-    $statuses = @($chain.ChainStatus |
-            Where-Object { $_.Status -ne [System.Security.Cryptography.X509Certificates.X509ChainStatusFlags]::NoError } |
-            ForEach-Object {
-                $statusText = $_.Status.ToString()
-                $infoText = $_.StatusInformation.Trim()
-                if ([string]::IsNullOrWhiteSpace($infoText))
-                {
-                    $statusText
-                }
-                else
-                {
-                    "$statusText ($infoText)"
-                }
-            })
-
+    $statuses = Get-ChainStatusMessages -Chain $chain
+    Write-CertificateChainVerbose -Chain $chain -Description $Description
     $statusMessage = if ($statuses.Count -gt 0)
     {
         $statuses -join '; '
@@ -353,12 +529,11 @@ function Get-ValidatedCertificateChain
     throw "$Description certificate chain validation failed: $statusMessage"
 }
 
-function Assert-ImmediateIssuerSha512Thumbprint
+function Get-ImmediateIssuerCertificate
 {
     param(
         [Parameter(Mandatory)][System.Security.Cryptography.X509Certificates.X509Chain]$Chain,
-        [Parameter(Mandatory)][string]$Description,
-        [Parameter(Mandatory)][string]$ExpectedSha512Thumbprint
+        [Parameter(Mandatory)][string]$Description
     )
 
     if ($Chain.ChainElements.Count -lt 2)
@@ -372,11 +547,8 @@ function Assert-ImmediateIssuerSha512Thumbprint
         throw "$Description certificate chain did not provide an issuing certificate."
     }
 
-    $actualThumbprint = Get-CertificateSha512Thumbprint -Certificate $issuerCertificate
-    if (-not [string]::Equals($actualThumbprint, $ExpectedSha512Thumbprint, [System.StringComparison]::Ordinal))
-    {
-        throw "$Description issuer certificate '$($issuerCertificate.Subject)' has SHA512 thumbprint '$actualThumbprint', expected '$ExpectedSha512Thumbprint'."
-    }
+    Write-CertificateDetailsVerbose -Description "$Description issuer" -Certificate $issuerCertificate
+    return $issuerCertificate
 }
 
 function Normalize-DistinguishedNameKey
@@ -423,6 +595,54 @@ function Parse-DistinguishedName
     return $result
 }
 
+function Get-WindowsBinaryTrustEvidence
+{
+    param(
+        [Parameter(Mandatory)][string]$BinaryPath
+    )
+
+    $resolvedBinaryPath = [System.IO.Path]::GetFullPath($BinaryPath)
+    Write-Verbose "Inspecting Authenticode signature for '$resolvedBinaryPath'."
+
+    $signature = Get-AuthenticodeSignature -FilePath $resolvedBinaryPath
+    $statusMessage = if ([string]::IsNullOrWhiteSpace($signature.StatusMessage)) { 'No additional details were provided.' } else { $signature.StatusMessage }
+    Write-Verbose "Authenticode signature status for '$resolvedBinaryPath': $($signature.Status) - $statusMessage"
+
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid)
+    {
+        throw "Authenticode signature validation failed for '$resolvedBinaryPath': $($signature.Status) - $statusMessage"
+    }
+
+    if ($null -eq $signature.SignerCertificate)
+    {
+        throw "Authenticode signature on '$resolvedBinaryPath' did not include a signer certificate."
+    }
+
+    $signerChain = Get-ValidatedCertificateChain -Certificate $signature.SignerCertificate -Description 'Signer' -IgnoreTimeValidity
+    $issuerCertificate = Get-ImmediateIssuerCertificate -Chain $signerChain -Description 'Signer'
+    $issuerThumbprint = Get-CertificateSha512Thumbprint -Certificate $issuerCertificate
+    Write-Verbose "Signer issuer SHA512 thumbprint for '$resolvedBinaryPath': '$issuerThumbprint'."
+
+    if ($null -eq $signature.TimeStamperCertificate)
+    {
+        throw "Expected a timestamped signature for '$resolvedBinaryPath', but no timestamp certificate was present."
+    }
+
+    $timestampChain = Get-ValidatedCertificateChain -Certificate $signature.TimeStamperCertificate -Description 'Timestamp'
+
+    return [pscustomobject]@{
+        BinaryPath = $resolvedBinaryPath
+        Signature = $signature
+        SignerCertificate = $signature.SignerCertificate
+        SignerSubject = $signature.SignerCertificate.Subject
+        SignerChain = $signerChain
+        SignerIssuerCertificate = $issuerCertificate
+        SignerIssuerSha512Thumbprint = $issuerThumbprint
+        TimeStamperCertificate = $signature.TimeStamperCertificate
+        TimeStamperChain = $timestampChain
+    }
+}
+
 function Assert-WindowsBinaryTrust
 {
     param(
@@ -431,19 +651,10 @@ function Assert-WindowsBinaryTrust
         [Parameter(Mandatory)][string]$ExpectedIssuerSha512Thumbprint
     )
 
-    $signature = Get-AuthenticodeSignature -FilePath $BinaryPath
-    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid)
-    {
-        $statusMessage = if ([string]::IsNullOrWhiteSpace($signature.StatusMessage)) { 'No additional details were provided.' } else { $signature.StatusMessage }
-        throw "Authenticode signature validation failed for '$BinaryPath': $($signature.Status) - $statusMessage"
-    }
+    $evidence = Get-WindowsBinaryTrustEvidence -BinaryPath $BinaryPath
+    Write-Verbose "Validating signer subject for '$($evidence.BinaryPath)'."
 
-    if ($null -eq $signature.SignerCertificate)
-    {
-        throw "Authenticode signature on '$BinaryPath' did not include a signer certificate."
-    }
-
-    $actualSubject = $signature.SignerCertificate.Subject
+    $actualSubject = $evidence.SignerSubject
     $expectedSubjectParts = Parse-DistinguishedName -DistinguishedName $ExpectedSubject
     $actualSubjectParts = Parse-DistinguishedName -DistinguishedName $actualSubject
     foreach ($key in $expectedSubjectParts.Keys)
@@ -461,15 +672,14 @@ function Assert-WindowsBinaryTrust
         }
     }
 
-    $signerChain = Get-ValidatedCertificateChain -Certificate $signature.SignerCertificate -Description 'Signer' -IgnoreTimeValidity
-    Assert-ImmediateIssuerSha512Thumbprint -Chain $signerChain -Description 'Signer' -ExpectedSha512Thumbprint $ExpectedIssuerSha512Thumbprint
-
-    if ($null -eq $signature.TimeStamperCertificate)
+    Write-Verbose "Validating signer issuer SHA512 thumbprint for '$($evidence.BinaryPath)'. Expected '$ExpectedIssuerSha512Thumbprint', actual '$($evidence.SignerIssuerSha512Thumbprint)'."
+    if (-not [string]::Equals($evidence.SignerIssuerSha512Thumbprint, $ExpectedIssuerSha512Thumbprint, [System.StringComparison]::Ordinal))
     {
-        throw "Expected a timestamped signature for '$BinaryPath', but no timestamp certificate was present."
+        throw "Signer issuer certificate '$($evidence.SignerIssuerCertificate.Subject)' has SHA512 thumbprint '$($evidence.SignerIssuerSha512Thumbprint)', expected '$ExpectedIssuerSha512Thumbprint'."
     }
 
-    $null = Get-ValidatedCertificateChain -Certificate $signature.TimeStamperCertificate -Description 'Timestamp'
+    Write-Verbose "Windows binary trust verification succeeded for '$($evidence.BinaryPath)'."
+    return $evidence
 }
 
 function Get-KustoVersionString
@@ -638,130 +848,156 @@ function Compare-SemanticVersion
     return 0
 }
 
-$architecture = Get-WindowsArchitecture
-$assetName = "kusto-win-$architecture.zip"
-$release = Get-ReleaseForQuality -Repo $Repository -SelectedQuality $Quality -AssetName $assetName
-$asset = Get-ReleaseAsset -Release $release -AssetName $assetName
-if ($null -eq $asset)
+function Invoke-KustoCliInstall
 {
-    throw "Release '$($release.name)' does not contain expected asset '$assetName'."
-}
+    $architecture = Get-WindowsArchitecture
+    $assetName = "kusto-win-$architecture.zip"
+    Write-Verbose "Selecting release asset '$assetName' for quality '$Quality' from '$Repository'."
 
-if ($Quality -eq 'Dev' -and -not $Force)
-{
-    $confirmation = Read-Host "Dev quality disables checksum/signature verification. Type YES to continue"
-    if ($confirmation -cne 'YES')
+    $release = Get-ReleaseForQuality -Repo $Repository -SelectedQuality $Quality -AssetName $assetName
+    Write-Verbose "Selected release '$($release.name)' ($($release.tag_name))."
+    $releaseStatusLabel = Get-ReleaseStatusLabel -SelectedQuality $Quality -Release $release
+
+    $asset = Get-ReleaseAsset -Release $release -AssetName $assetName
+    if ($null -eq $asset)
     {
-        throw 'Installation canceled by user.'
+        throw "Release '$($release.name)' does not contain expected asset '$assetName'."
     }
-}
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("kusto-install-" + [guid]::NewGuid().ToString('N'))
-$downloadPath = Join-Path $tempRoot $assetName
-$extractPath = Join-Path $tempRoot 'extract'
-
-try
-{
-    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
-    Invoke-GitHubAssetDownload -Uri $asset.browser_download_url -OutFile $downloadPath
-
-    if ($Quality -ne 'Dev')
+    if ($Quality -eq 'Dev' -and -not $Force)
     {
-        $checksumsAsset = Get-ReleaseAsset -Release $release -AssetName 'checksums.txt'
-        if ($null -eq $checksumsAsset)
+        $confirmation = Read-Host "Dev quality disables checksum/signature verification. Type YES to continue"
+        if ($confirmation -cne 'YES')
         {
-            throw "Release '$($release.name)' did not include checksums.txt."
+            throw 'Installation canceled by user.'
+        }
+    }
+
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("kusto-install-" + [guid]::NewGuid().ToString('N'))
+    $downloadPath = Join-Path $tempRoot $assetName
+    $extractPath = Join-Path $tempRoot 'extract'
+
+    Write-Verbose "Using temporary workspace '$tempRoot'."
+
+    try
+    {
+        New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+
+        Invoke-StatusStep -Message "Downloading $releaseStatusLabel" -Action {
+            Write-Verbose "Downloading release asset from '$($asset.browser_download_url)' to '$downloadPath'."
+            Invoke-GitHubAssetDownload -Uri $asset.browser_download_url -OutFile $downloadPath
         }
 
-        $checksumsPath = Join-Path $tempRoot 'checksums.txt'
-        Invoke-GitHubAssetDownload -Uri $checksumsAsset.browser_download_url -OutFile $checksumsPath
-
-        $expectedSha = Get-ExpectedSha256 -ChecksumsPath $checksumsPath -AssetName $assetName
-        $actualSha = (Get-FileHash -Path $downloadPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($expectedSha -ne $actualSha)
+        if ($Quality -ne 'Dev')
         {
-            throw "SHA256 mismatch for '$assetName'. Expected '$expectedSha' but got '$actualSha'."
-        }
-
-        $releaseMetadataAsset = Get-ReleaseAsset -Release $release -AssetName 'release-metadata.json'
-        if ($null -ne $releaseMetadataAsset)
-        {
-            $metadataPath = Join-Path $tempRoot 'release-metadata.json'
-            Invoke-GitHubAssetDownload -Uri $releaseMetadataAsset.browser_download_url -OutFile $metadataPath
-            $metadata = Get-Content -Path $metadataPath -Raw | ConvertFrom-Json
-            $metadataAsset = $metadata.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
-            if ($null -eq $metadataAsset)
+            $checksumsAsset = Get-ReleaseAsset -Release $release -AssetName 'checksums.txt'
+            if ($null -eq $checksumsAsset)
             {
-                throw "release-metadata.json did not contain asset '$assetName'."
+                throw "Release '$($release.name)' did not include checksums.txt."
             }
 
-            if ($metadataAsset.sha256.ToLowerInvariant() -ne $expectedSha)
+            $checksumsPath = Join-Path $tempRoot 'checksums.txt'
+            Write-Verbose "Downloading checksums from '$($checksumsAsset.browser_download_url)' to '$checksumsPath'."
+            Invoke-GitHubAssetDownload -Uri $checksumsAsset.browser_download_url -OutFile $checksumsPath
+
+            $releaseMetadataPath = $null
+            $releaseMetadataAsset = Get-ReleaseAsset -Release $release -AssetName 'release-metadata.json'
+            if ($null -ne $releaseMetadataAsset)
             {
-                throw "release-metadata.json SHA256 for '$assetName' did not match checksums.txt."
+                $releaseMetadataPath = Join-Path $tempRoot 'release-metadata.json'
+                Write-Verbose "Downloading release metadata from '$($releaseMetadataAsset.browser_download_url)' to '$releaseMetadataPath'."
+                Invoke-GitHubAssetDownload -Uri $releaseMetadataAsset.browser_download_url -OutFile $releaseMetadataPath
+            }
+
+            Invoke-StatusStep -Message 'Verifying asset checksums' -Action {
+                $null = Assert-WindowsArchiveIntegrity -ArchivePath $downloadPath -AssetName $assetName -ChecksumsPath $checksumsPath -ReleaseMetadataPath $releaseMetadataPath
             }
         }
-    }
 
-    Expand-Archive -Path $downloadPath -DestinationPath $extractPath -Force
-    $downloadedBinaryPath = Join-Path $extractPath 'kusto.exe'
-    if (-not (Test-Path $downloadedBinaryPath))
-    {
-        throw "Downloaded archive '$assetName' did not contain 'kusto.exe'."
-    }
+        $downloadedBinaryPath = Expand-WindowsReleaseArchive -ArchivePath $downloadPath -DestinationPath $extractPath
 
-    if ($Quality -ne 'Dev')
-    {
-        Assert-WindowsBinaryTrust -BinaryPath $downloadedBinaryPath -ExpectedSubject $ExpectedSignerSubject -ExpectedIssuerSha512Thumbprint $ExpectedSignerIssuerSha512Thumbprint
-    }
-
-    $installDirectory = [System.IO.Path]::GetFullPath($TargetPath)
-    New-Item -ItemType Directory -Path $installDirectory -Force | Out-Null
-
-    $destinationPath = Join-Path $installDirectory 'kusto.exe'
-    $downloadedVersion = Get-KustoVersionString -BinaryPath $downloadedBinaryPath
-
-    $shouldInstall = $true
-    if (Test-Path $destinationPath)
-    {
-        $existingVersion = Get-KustoVersionString -BinaryPath $destinationPath
-        $comparison = Compare-SemanticVersion -Left $downloadedVersion -Right $existingVersion
-        if ($comparison -le 0)
+        if ($Quality -ne 'Dev')
         {
-            $shouldInstall = $false
-            Write-Host "Existing kusto.exe version '$existingVersion' is newer than or equal to downloaded version '$downloadedVersion'; skipping overwrite."
+            Invoke-StatusStep -Message 'Verifying asset provenance' -Action {
+                $null = Assert-WindowsBinaryTrust -BinaryPath $downloadedBinaryPath -ExpectedSubject $ExpectedSignerSubject -ExpectedIssuerSha512Thumbprint $ExpectedSignerIssuerSha512Thumbprint
+            }
         }
-    }
-
-    if ($shouldInstall)
-    {
-        Copy-Item -Path $downloadedBinaryPath -Destination $destinationPath -Force
-        Write-Host "Installed kusto.exe version '$downloadedVersion' to '$installDirectory'."
-    }
-
-    if ($UpdatePath)
-    {
-        $sessionPathUpdated = Ensure-PathContains -Entry $installDirectory -Target Process
-        $userPathUpdated = Ensure-PathContains -Entry $installDirectory -Target User
-
-        if ($sessionPathUpdated)
+        else
         {
-            Write-Host "Added '$installDirectory' to current session PATH."
+            Write-Host 'Skipping checksum and provenance verification for development build.'
         }
 
-        if ($userPathUpdated)
+        $installDirectory = [System.IO.Path]::GetFullPath($TargetPath)
+        Write-Verbose "Installing to '$installDirectory'."
+        New-Item -ItemType Directory -Path $installDirectory -Force | Out-Null
+
+        $destinationPath = Join-Path $installDirectory 'kusto.exe'
+        $downloadedVersion = Get-KustoVersionString -BinaryPath $downloadedBinaryPath
+        $installedVersion = $downloadedVersion
+        Write-Verbose "Downloaded kusto.exe version: '$downloadedVersion'."
+
+        $shouldInstall = $true
+        if (Test-Path $destinationPath)
         {
-            Write-Host "Added '$installDirectory' to user PATH. Open a new terminal to pick up the change."
+            $existingVersion = Get-KustoVersionString -BinaryPath $destinationPath
+            $comparison = Compare-SemanticVersion -Left $downloadedVersion -Right $existingVersion
+            Write-Verbose "Existing kusto.exe version at '$destinationPath': '$existingVersion'. Comparison result: $comparison."
+            if ($comparison -le 0)
+            {
+                $shouldInstall = $false
+                $installedVersion = $existingVersion
+                Write-Host "Existing kusto.exe version '$existingVersion' is newer than or equal to downloaded version '$downloadedVersion'; skipping overwrite."
+            }
         }
+
+        if ($shouldInstall)
+        {
+            Invoke-StatusStep -Message "Installing $downloadedVersion to '$installDirectory'" -Action {
+                Copy-Item -Path $downloadedBinaryPath -Destination $destinationPath -Force
+            }
+        }
+
+        if ($UpdatePath)
+        {
+            $sessionPathUpdated = Ensure-PathContains -Entry $installDirectory -Target Process
+            $userPathUpdated = Ensure-PathContains -Entry $installDirectory -Target User
+
+            if ($sessionPathUpdated)
+            {
+                Write-Host "Added '$installDirectory' to current session PATH."
+            }
+            else
+            {
+                Write-Host "Current session PATH already contains '$installDirectory'."
+            }
+
+            if ($userPathUpdated)
+            {
+                Write-Host "Added '$installDirectory' to user PATH (will take effect in new terminal sessions)."
+            }
+            else
+            {
+                Write-Host "User PATH already contains '$installDirectory'."
+            }
+        }
+        else
+        {
+            Write-Host "Skipped PATH updates because -UpdatePath was set to false."
+        }
+
+        Write-Host "kusto $installedVersion is ready to use from '$installDirectory'." -ForegroundColor Green
     }
-    else
+    finally
     {
-        Write-Host "Skipped PATH updates because -UpdatePath was set to false."
+        if (Test-Path $tempRoot)
+        {
+            Write-Verbose "Cleaning up temporary workspace '$tempRoot'."
+            Remove-Item -Path $tempRoot -Recurse -Force
+        }
     }
 }
-finally
+
+if (-not $NoExecute)
 {
-    if (Test-Path $tempRoot)
-    {
-        Remove-Item -Path $tempRoot -Recurse -Force
-    }
+    Invoke-KustoCliInstall
 }
