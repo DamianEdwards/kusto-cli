@@ -4,9 +4,15 @@ A native command-line tool for Azure Data Explorer (Kusto), focused on quick exp
 
 ## Install now on Windows
 
+In a PowerShell terminal:
+
 ```PowerShell
 irm https://kusto.damianedwards.dev/install.ps1 | iex
 ```
+
+## Install on macOS or Linux
+
+Grab the relevant executable asset from the latest [release](https://github.com/DamianEdwards/kusto-cli/releases).
 
 ## What this CLI supports
 
