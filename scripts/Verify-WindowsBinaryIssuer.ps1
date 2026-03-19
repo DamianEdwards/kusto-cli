@@ -25,12 +25,13 @@ Write-Verbose "Loading installer trust helpers from '$installerScriptPath'."
 . $installerScriptPath -NoExecute
 
 $config = Get-KustoInstallerTrustConfiguration
-$expectedThumbprint = $config.ExpectedSignerIssuerSha512Thumbprint
+$expectedThumbprints = @($config.ExpectedSignerIssuerSha512Thumbprints)
 $evidence = Get-WindowsBinaryTrustEvidence -BinaryPath $binaryPath
 
-if (-not [string]::Equals($evidence.SignerIssuerSha512Thumbprint, $expectedThumbprint, [System.StringComparison]::Ordinal))
-{
-    throw "Signer issuer certificate for '$binaryPath' changed. Expected SHA512 '$expectedThumbprint' from '$installerScriptPath', but found '$($evidence.SignerIssuerSha512Thumbprint)' on issuer '$($evidence.SignerIssuerCertificate.Subject)'. If this rotation is intentional, update '$installerScriptPath' to use the new SHA512 thumbprint '$($evidence.SignerIssuerSha512Thumbprint)'."
-}
+Assert-SignerIssuerSha512Thumbprint `
+    -IssuerCertificate $evidence.SignerIssuerCertificate `
+    -ActualThumbprint $evidence.SignerIssuerSha512Thumbprint `
+    -ExpectedThumbprints $expectedThumbprints
 
-Write-Host "Verified signer issuer certificate for '$binaryPath': '$($evidence.SignerIssuerCertificate.Subject)' ($($evidence.SignerIssuerSha512Thumbprint))."
+$formattedExpectedThumbprints = ($expectedThumbprints | ForEach-Object { "'$_'" }) -join ', '
+Write-Host "Verified signer issuer certificate for '$binaryPath': '$($evidence.SignerIssuerCertificate.Subject)' ($($evidence.SignerIssuerSha512Thumbprint)). Allowed SHA512 thumbprints: $formattedExpectedThumbprints."

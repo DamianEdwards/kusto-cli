@@ -19,8 +19,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Keep this single-sourced here; the release workflow reads this value from the installer script.
-$ExpectedSignerIssuerSha512Thumbprint = '1c93dcf4e032b19949a67722d0c25e683309fbcd36110da84129f45d8175b709ebc6ef3439596ece9eb8f2dae1967b856adc49ba74535244a8a5db5fb48fa7b9'
+# Keep this single-sourced here; the release workflow reads these values from the installer script.
+$ExpectedSignerIssuerSha512Thumbprints = @(
+    '1c93dcf4e032b19949a67722d0c25e683309fbcd36110da84129f45d8175b709ebc6ef3439596ece9eb8f2dae1967b856adc49ba74535244a8a5db5fb48fa7b9'
+    '1770433e5d2c028e0bf8640a0345bdb86307e7cc2a99cfbe93acf9d960a996d1c63b2d5cf30d52e7741df4fd057ea778442f75c1b62ee2106c66333078a04e6d'
+)
 
 $runningOnWindows = if (Get-Variable -Name IsWindows -ErrorAction SilentlyContinue)
 {
@@ -290,7 +293,7 @@ function Get-KustoInstallerTrustConfiguration
 {
     return [pscustomobject]@{
         ExpectedSignerSubject = $ExpectedSignerSubject
-        ExpectedSignerIssuerSha512Thumbprint = $ExpectedSignerIssuerSha512Thumbprint
+        ExpectedSignerIssuerSha512Thumbprints = @($ExpectedSignerIssuerSha512Thumbprints)
     }
 }
 
@@ -643,12 +646,40 @@ function Get-WindowsBinaryTrustEvidence
     }
 }
 
+function Assert-SignerIssuerSha512Thumbprint
+{
+    param(
+        [Parameter(Mandatory)][System.Security.Cryptography.X509Certificates.X509Certificate2]$IssuerCertificate,
+        [Parameter(Mandatory)][string]$ActualThumbprint,
+        [Parameter(Mandatory)][string[]]$ExpectedThumbprints
+    )
+
+    $expectedThumbprintSet = @($ExpectedThumbprints |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object { $_.Trim() })
+    if ($expectedThumbprintSet.Count -eq 0)
+    {
+        throw 'At least one expected signer issuer SHA512 thumbprint is required.'
+    }
+
+    $formattedExpectedThumbprints = ($expectedThumbprintSet | ForEach-Object { "'$_'" }) -join ', '
+    Write-Verbose "Validating signer issuer SHA512 thumbprint. Expected one of $formattedExpectedThumbprints, actual '$ActualThumbprint'."
+
+    $matchingThumbprint = $expectedThumbprintSet |
+        Where-Object { [string]::Equals($_, $ActualThumbprint, [System.StringComparison]::OrdinalIgnoreCase) } |
+        Select-Object -First 1
+    if (-not $matchingThumbprint)
+    {
+        throw "Signer issuer certificate '$($IssuerCertificate.Subject)' has SHA512 thumbprint '$ActualThumbprint', expected one of: $formattedExpectedThumbprints."
+    }
+}
+
 function Assert-WindowsBinaryTrust
 {
     param(
         [Parameter(Mandatory)][string]$BinaryPath,
         [Parameter(Mandatory)][string]$ExpectedSubject,
-        [Parameter(Mandatory)][string]$ExpectedIssuerSha512Thumbprint
+        [Parameter(Mandatory)][string[]]$ExpectedIssuerSha512Thumbprints
     )
 
     $evidence = Get-WindowsBinaryTrustEvidence -BinaryPath $BinaryPath
@@ -672,11 +703,10 @@ function Assert-WindowsBinaryTrust
         }
     }
 
-    Write-Verbose "Validating signer issuer SHA512 thumbprint for '$($evidence.BinaryPath)'. Expected '$ExpectedIssuerSha512Thumbprint', actual '$($evidence.SignerIssuerSha512Thumbprint)'."
-    if (-not [string]::Equals($evidence.SignerIssuerSha512Thumbprint, $ExpectedIssuerSha512Thumbprint, [System.StringComparison]::Ordinal))
-    {
-        throw "Signer issuer certificate '$($evidence.SignerIssuerCertificate.Subject)' has SHA512 thumbprint '$($evidence.SignerIssuerSha512Thumbprint)', expected '$ExpectedIssuerSha512Thumbprint'."
-    }
+    Assert-SignerIssuerSha512Thumbprint `
+        -IssuerCertificate $evidence.SignerIssuerCertificate `
+        -ActualThumbprint $evidence.SignerIssuerSha512Thumbprint `
+        -ExpectedThumbprints $ExpectedIssuerSha512Thumbprints
 
     Write-Verbose "Windows binary trust verification succeeded for '$($evidence.BinaryPath)'."
     return $evidence
@@ -919,7 +949,7 @@ function Invoke-KustoCliInstall
         if ($Quality -ne 'Dev')
         {
             Invoke-StatusStep -Message 'Verifying asset provenance' -Action {
-                $null = Assert-WindowsBinaryTrust -BinaryPath $downloadedBinaryPath -ExpectedSubject $ExpectedSignerSubject -ExpectedIssuerSha512Thumbprint $ExpectedSignerIssuerSha512Thumbprint
+                $null = Assert-WindowsBinaryTrust -BinaryPath $downloadedBinaryPath -ExpectedSubject $ExpectedSignerSubject -ExpectedIssuerSha512Thumbprints $ExpectedSignerIssuerSha512Thumbprints
             }
         }
         else

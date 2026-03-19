@@ -194,7 +194,7 @@ try
         'InstallerDefaults'
         {
             $binaryPath = Get-RequiredFullPath -Path $BinaryPath -Description 'Signed binary'
-            $evidence = Assert-WindowsBinaryTrust -BinaryPath $binaryPath -ExpectedSubject $config.ExpectedSignerSubject -ExpectedIssuerSha512Thumbprint $config.ExpectedSignerIssuerSha512Thumbprint
+            $evidence = Assert-WindowsBinaryTrust -BinaryPath $binaryPath -ExpectedSubject $config.ExpectedSignerSubject -ExpectedIssuerSha512Thumbprints $config.ExpectedSignerIssuerSha512Thumbprints
             Write-Host "Scenario 'InstallerDefaults' succeeded for '$binaryPath': '$($evidence.SignerIssuerCertificate.Subject)' ($($evidence.SignerIssuerSha512Thumbprint))."
         }
 
@@ -202,7 +202,7 @@ try
         {
             $binaryPath = Get-RequiredFullPath -Path $BinaryPath -Description 'Signed binary'
             $evidence = Get-WindowsBinaryTrustEvidence -BinaryPath $binaryPath
-            $null = Assert-WindowsBinaryTrust -BinaryPath $binaryPath -ExpectedSubject $evidence.SignerSubject -ExpectedIssuerSha512Thumbprint $evidence.SignerIssuerSha512Thumbprint
+            $null = Assert-WindowsBinaryTrust -BinaryPath $binaryPath -ExpectedSubject $evidence.SignerSubject -ExpectedIssuerSha512Thumbprints @($evidence.SignerIssuerSha512Thumbprint)
             Write-Host "Scenario 'GoodBinary' succeeded for '$binaryPath': '$($evidence.SignerSubject)' issued by '$($evidence.SignerIssuerCertificate.Subject)'."
         }
 
@@ -229,7 +229,7 @@ try
             $evidence = Get-WindowsBinaryTrustEvidence -BinaryPath $binaryPath
             $mutatedSubject = Get-MutatedExpectedSubject -Subject $evidence.SignerSubject
             Invoke-ExpectedFailure -ScenarioName $Scenario -ExpectedMessageFragment 'expected' -Action {
-                $null = Assert-WindowsBinaryTrust -BinaryPath $binaryPath -ExpectedSubject $mutatedSubject -ExpectedIssuerSha512Thumbprint $evidence.SignerIssuerSha512Thumbprint
+                $null = Assert-WindowsBinaryTrust -BinaryPath $binaryPath -ExpectedSubject $mutatedSubject -ExpectedIssuerSha512Thumbprints @($evidence.SignerIssuerSha512Thumbprint)
             }
         }
 
@@ -239,7 +239,7 @@ try
             $evidence = Get-WindowsBinaryTrustEvidence -BinaryPath $binaryPath
             $mutatedThumbprint = Get-MutatedHexString -Value $evidence.SignerIssuerSha512Thumbprint
             Invoke-ExpectedFailure -ScenarioName $Scenario -ExpectedMessageFragment 'expected' -Action {
-                $null = Assert-WindowsBinaryTrust -BinaryPath $binaryPath -ExpectedSubject $evidence.SignerSubject -ExpectedIssuerSha512Thumbprint $mutatedThumbprint
+                $null = Assert-WindowsBinaryTrust -BinaryPath $binaryPath -ExpectedSubject $evidence.SignerSubject -ExpectedIssuerSha512Thumbprints @($mutatedThumbprint)
             }
         }
 
