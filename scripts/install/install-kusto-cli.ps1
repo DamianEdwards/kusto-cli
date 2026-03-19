@@ -933,6 +933,7 @@ function Invoke-KustoCliInstall
 
         $destinationPath = Join-Path $installDirectory 'kusto.exe'
         $downloadedVersion = Get-KustoVersionString -BinaryPath $downloadedBinaryPath
+        $installedVersion = $downloadedVersion
         Write-Verbose "Downloaded kusto.exe version: '$downloadedVersion'."
 
         $shouldInstall = $true
@@ -944,6 +945,7 @@ function Invoke-KustoCliInstall
             if ($comparison -le 0)
             {
                 $shouldInstall = $false
+                $installedVersion = $existingVersion
                 Write-Host "Existing kusto.exe version '$existingVersion' is newer than or equal to downloaded version '$downloadedVersion'; skipping overwrite."
             }
         }
@@ -964,16 +966,26 @@ function Invoke-KustoCliInstall
             {
                 Write-Host "Added '$installDirectory' to current session PATH."
             }
+            else
+            {
+                Write-Host "Current session PATH already contains '$installDirectory'."
+            }
 
             if ($userPathUpdated)
             {
-                Write-Host "Added '$installDirectory' to user PATH. Open a new terminal to pick up the change."
+                Write-Host "Added '$installDirectory' to user PATH (will take effect in new terminal sessions)."
+            }
+            else
+            {
+                Write-Host "User PATH already contains '$installDirectory'."
             }
         }
         else
         {
             Write-Host "Skipped PATH updates because -UpdatePath was set to false."
         }
+
+        Write-Host "kusto $installedVersion is ready to use from '$installDirectory'." -ForegroundColor Green
     }
     finally
     {
