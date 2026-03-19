@@ -402,7 +402,7 @@ Installer behavior:
 
 ### Manually verify Windows provenance checks
 
-The installer's Windows provenance logic now has two supporting scripts:
+The installer's Windows provenance logic has two supporting scripts:
 
 - `scripts/Verify-WindowsBinaryIssuer.ps1` reuses the installer's trust helpers and verifies signature validity, certificate-chain/timestamp validity, and the installer's configured issuer thumbprint.
 - `scripts/Test-InstallerProvenance.ps1` stages positive and negative scenarios so you can make the trust checks fail on demand and inspect them with `-Verbose`.
@@ -458,7 +458,7 @@ Expected outcomes by scenario:
 - `ChecksumMismatch` fails with a `SHA256 mismatch` error.
 - `MetadataMismatch` fails because `release-metadata.json` no longer matches `checksums.txt`.
 
-The harder timestamp or certificate-chain failure cases still need a lab-signed binary or another controlled fixture, but the verbose output from these scripts now shows the exact signer, issuer, timestamp, chain elements, and thumbprints involved in each decision.
+The harder timestamp or certificate-chain failure cases still need a lab-signed binary or another controlled fixture, but the verbose output from these scripts shows the exact signer, issuer, timestamp, chain elements, and thumbprints involved in each decision.
 
 ## Build and test
 
