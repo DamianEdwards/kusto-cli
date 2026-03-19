@@ -416,10 +416,17 @@ pwsh .\scripts\Test-InstallerProvenance.ps1 -Scenario InstallerDefaults -BinaryP
 To create an unsigned local Windows bundle that exercises the checksum, metadata, and unsigned-binary failure paths:
 
 ```powershell
+Remove-Item .\artifacts\local-release, .\artifacts\local-bundle -Recurse -Force -ErrorAction SilentlyContinue
 pwsh .\scripts\Publish-NativeAsset.ps1 -RuntimeIdentifier win-x64 -Version 0.1.0-local -ArtifactsDirectory .\artifacts\local-release
+Get-ChildItem .\artifacts\local-release
 pwsh .\scripts\Merge-ReleaseBundle.ps1 -InputDirectory .\artifacts\local-release -OutputDirectory .\artifacts\local-bundle -Version 0.1.0-local
+Get-ChildItem .\artifacts\local-bundle
 Expand-Archive -Path .\artifacts\local-bundle\kusto-win-x64.zip -DestinationPath .\artifacts\local-bundle\extract -Force
 ```
+
+After `Publish-NativeAsset`, `.\artifacts\local-release` should contain `kusto-win-x64.zip`, `kusto-win-x64.zip.sha256`, and `kusto-win-x64.json`.
+
+After `Merge-ReleaseBundle`, `.\artifacts\local-bundle` should contain `kusto-win-x64.zip`, `checksums.txt`, and `release-metadata.json`. An `extract` directory on its own is just a previous expansion target; it does not mean the bundle zip was created.
 
 Then run the staged failure scenarios:
 
