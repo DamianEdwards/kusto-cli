@@ -24,6 +24,9 @@ $ExpectedSignerIssuerSha512Thumbprints = @(
     '1c93dcf4e032b19949a67722d0c25e683309fbcd36110da84129f45d8175b709ebc6ef3439596ece9eb8f2dae1967b856adc49ba74535244a8a5db5fb48fa7b9'
     '1770433e5d2c028e0bf8640a0345bdb86307e7cc2a99cfbe93acf9d960a996d1c63b2d5cf30d52e7741df4fd057ea778442f75c1b62ee2106c66333078a04e6d'
 )
+$ExpectedSignerParentIssuerSha512Thumbprints = @(
+    '46f16bb99340f8d728c83ff093af9d4cff87811d432f92a804741144f0f3fc0aa8011b1efe0c24e0480bd6c7cb7af699077f9b8fc7ec8a40f9f7a186725224c6'
+)
 
 $runningOnWindows = if (Get-Variable -Name IsWindows -ErrorAction SilentlyContinue)
 {
@@ -294,6 +297,7 @@ function Get-KustoInstallerTrustConfiguration
     return [pscustomobject]@{
         ExpectedSignerSubject = $ExpectedSignerSubject
         ExpectedSignerIssuerSha512Thumbprints = @($ExpectedSignerIssuerSha512Thumbprints)
+        ExpectedSignerParentIssuerSha512Thumbprints = @($ExpectedSignerParentIssuerSha512Thumbprints)
     }
 }
 
@@ -554,6 +558,39 @@ function Get-ImmediateIssuerCertificate
     return $issuerCertificate
 }
 
+function Get-ParentIntermediateIssuerCertificate
+{
+    param(
+        [Parameter(Mandatory)][System.Security.Cryptography.X509Certificates.X509Chain]$Chain,
+        [Parameter(Mandatory)][string]$Description
+    )
+
+    if ($Chain.ChainElements.Count -lt 3)
+    {
+        Write-Verbose "$Description certificate chain did not include a parent issuer fallback candidate."
+        return $null
+    }
+
+    $parentIndex = 2
+    $parentCertificate = $Chain.ChainElements[$parentIndex].Certificate
+    if ($null -eq $parentCertificate)
+    {
+        Write-Verbose "$Description certificate chain did not provide a parent issuer fallback candidate."
+        return $null
+    }
+
+    $isRootCandidate = ($parentIndex -eq ($Chain.ChainElements.Count - 1)) -or
+        [string]::Equals($parentCertificate.Subject, $parentCertificate.Issuer, [System.StringComparison]::OrdinalIgnoreCase)
+    if ($isRootCandidate)
+    {
+        Write-Verbose "$Description parent issuer fallback candidate resolved to a root certificate. Root certificates are never used for issuer fallback."
+        return $null
+    }
+
+    Write-CertificateDetailsVerbose -Description "$Description parent issuer" -Certificate $parentCertificate
+    return $parentCertificate
+}
+
 function Normalize-DistinguishedNameKey
 {
     param([Parameter(Mandatory)][string]$Key)
@@ -625,6 +662,13 @@ function Get-WindowsBinaryTrustEvidence
     $issuerCertificate = Get-ImmediateIssuerCertificate -Chain $signerChain -Description 'Signer'
     $issuerThumbprint = Get-CertificateSha512Thumbprint -Certificate $issuerCertificate
     Write-Verbose "Signer issuer SHA512 thumbprint for '$resolvedBinaryPath': '$issuerThumbprint'."
+    $parentIssuerCertificate = Get-ParentIntermediateIssuerCertificate -Chain $signerChain -Description 'Signer'
+    $parentIssuerThumbprint = $null
+    if ($null -ne $parentIssuerCertificate)
+    {
+        $parentIssuerThumbprint = Get-CertificateSha512Thumbprint -Certificate $parentIssuerCertificate
+        Write-Verbose "Signer parent issuer SHA512 thumbprint for '$resolvedBinaryPath': '$parentIssuerThumbprint'."
+    }
 
     if ($null -eq $signature.TimeStamperCertificate)
     {
@@ -641,37 +685,103 @@ function Get-WindowsBinaryTrustEvidence
         SignerChain = $signerChain
         SignerIssuerCertificate = $issuerCertificate
         SignerIssuerSha512Thumbprint = $issuerThumbprint
+        SignerParentIssuerCertificate = $parentIssuerCertificate
+        SignerParentIssuerSha512Thumbprint = $parentIssuerThumbprint
         TimeStamperCertificate = $signature.TimeStamperCertificate
         TimeStamperChain = $timestampChain
     }
 }
 
-function Assert-SignerIssuerSha512Thumbprint
+function Get-NormalizedSha512ThumbprintSet
 {
     param(
-        [Parameter(Mandatory)][System.Security.Cryptography.X509Certificates.X509Certificate2]$IssuerCertificate,
+        [Parameter(Mandatory)][string[]]$Thumbprints,
+        [Parameter(Mandatory)][string]$Description
+    )
+
+    $normalizedThumbprintSet = @($Thumbprints |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object { $_.Trim().ToLowerInvariant() })
+    if ($normalizedThumbprintSet.Count -eq 0)
+    {
+        throw "At least one expected $Description SHA512 thumbprint is required."
+    }
+
+    return $normalizedThumbprintSet
+}
+
+function Format-Sha512ThumbprintSet
+{
+    param([Parameter(Mandatory)][string[]]$Thumbprints)
+
+    return ($Thumbprints | ForEach-Object { "'$_'" }) -join ', '
+}
+
+function Test-Sha512ThumbprintMatch
+{
+    param(
         [Parameter(Mandatory)][string]$ActualThumbprint,
         [Parameter(Mandatory)][string[]]$ExpectedThumbprints
     )
 
-    $expectedThumbprintSet = @($ExpectedThumbprints |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-        ForEach-Object { $_.Trim() })
-    if ($expectedThumbprintSet.Count -eq 0)
-    {
-        throw 'At least one expected signer issuer SHA512 thumbprint is required.'
-    }
-
-    $formattedExpectedThumbprints = ($expectedThumbprintSet | ForEach-Object { "'$_'" }) -join ', '
-    Write-Verbose "Validating signer issuer SHA512 thumbprint. Expected one of $formattedExpectedThumbprints, actual '$ActualThumbprint'."
-
-    $matchingThumbprint = $expectedThumbprintSet |
+    $match = $ExpectedThumbprints |
         Where-Object { [string]::Equals($_, $ActualThumbprint, [System.StringComparison]::OrdinalIgnoreCase) } |
         Select-Object -First 1
-    if (-not $matchingThumbprint)
+    return ($null -ne $match)
+}
+
+function Assert-SignerIssuerTrust
+{
+    param(
+        [Parameter(Mandatory)]$Evidence,
+        [Parameter(Mandatory)][string[]]$ExpectedIssuerThumbprints,
+        [string[]]$ExpectedParentIssuerThumbprints = @()
+    )
+
+    $expectedIssuerThumbprintSet = Get-NormalizedSha512ThumbprintSet -Thumbprints $ExpectedIssuerThumbprints -Description 'signer issuer'
+    $formattedExpectedIssuerThumbprints = Format-Sha512ThumbprintSet -Thumbprints $expectedIssuerThumbprintSet
+    Write-Verbose "Validating signer immediate issuer SHA512 thumbprint for '$($Evidence.BinaryPath)'. Expected one of $formattedExpectedIssuerThumbprints, actual '$($Evidence.SignerIssuerSha512Thumbprint)'."
+
+    if (Test-Sha512ThumbprintMatch -ActualThumbprint $Evidence.SignerIssuerSha512Thumbprint -ExpectedThumbprints $expectedIssuerThumbprintSet)
     {
-        throw "Signer issuer certificate '$($IssuerCertificate.Subject)' has SHA512 thumbprint '$ActualThumbprint', expected one of: $formattedExpectedThumbprints."
+        Write-Verbose "Signer immediate issuer matched configured issuer SHA512 thumbprints for '$($Evidence.BinaryPath)'."
+        return [pscustomobject]@{
+            MatchSource = 'ImmediateIssuer'
+            Certificate = $Evidence.SignerIssuerCertificate
+            Sha512Thumbprint = $Evidence.SignerIssuerSha512Thumbprint
+            UsedFallback = $false
+        }
     }
+
+    Write-Verbose "Signer immediate issuer thumbprint for '$($Evidence.BinaryPath)' did not match configured issuer SHA512 thumbprints. Evaluating parent issuer fallback."
+    $expectedParentIssuerThumbprintSet = @($ExpectedParentIssuerThumbprints |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object { $_.Trim().ToLowerInvariant() })
+    if ($expectedParentIssuerThumbprintSet.Count -eq 0)
+    {
+        throw "Signer issuer certificate '$($Evidence.SignerIssuerCertificate.Subject)' has SHA512 thumbprint '$($Evidence.SignerIssuerSha512Thumbprint)', expected one of: $formattedExpectedIssuerThumbprints. Parent issuer fallback is not configured."
+    }
+
+    $formattedExpectedParentIssuerThumbprints = Format-Sha512ThumbprintSet -Thumbprints $expectedParentIssuerThumbprintSet
+
+    if ($null -eq $Evidence.SignerParentIssuerCertificate -or [string]::IsNullOrWhiteSpace($Evidence.SignerParentIssuerSha512Thumbprint))
+    {
+        throw "Signer issuer certificate '$($Evidence.SignerIssuerCertificate.Subject)' has SHA512 thumbprint '$($Evidence.SignerIssuerSha512Thumbprint)', expected one of: $formattedExpectedIssuerThumbprints. Parent issuer fallback expected one of: $formattedExpectedParentIssuerThumbprints, but no parent intermediate issuer was available."
+    }
+
+    Write-Verbose "Falling back to signer parent issuer SHA512 thumbprint for '$($Evidence.BinaryPath)'. Expected one of $formattedExpectedParentIssuerThumbprints, actual '$($Evidence.SignerParentIssuerSha512Thumbprint)'."
+    if (Test-Sha512ThumbprintMatch -ActualThumbprint $Evidence.SignerParentIssuerSha512Thumbprint -ExpectedThumbprints $expectedParentIssuerThumbprintSet)
+    {
+        Write-Verbose "Signer parent issuer fallback matched configured parent issuer SHA512 thumbprints for '$($Evidence.BinaryPath)'."
+        return [pscustomobject]@{
+            MatchSource = 'ParentIssuer'
+            Certificate = $Evidence.SignerParentIssuerCertificate
+            Sha512Thumbprint = $Evidence.SignerParentIssuerSha512Thumbprint
+            UsedFallback = $true
+        }
+    }
+
+    throw "Signer issuer certificate '$($Evidence.SignerIssuerCertificate.Subject)' has SHA512 thumbprint '$($Evidence.SignerIssuerSha512Thumbprint)', expected one of: $formattedExpectedIssuerThumbprints. Fallback parent issuer certificate '$($Evidence.SignerParentIssuerCertificate.Subject)' has SHA512 thumbprint '$($Evidence.SignerParentIssuerSha512Thumbprint)', expected one of: $formattedExpectedParentIssuerThumbprints."
 }
 
 function Assert-WindowsBinaryTrust
@@ -679,7 +789,8 @@ function Assert-WindowsBinaryTrust
     param(
         [Parameter(Mandatory)][string]$BinaryPath,
         [Parameter(Mandatory)][string]$ExpectedSubject,
-        [Parameter(Mandatory)][string[]]$ExpectedIssuerSha512Thumbprints
+        [Parameter(Mandatory)][string[]]$ExpectedIssuerSha512Thumbprints,
+        [string[]]$ExpectedParentIssuerSha512Thumbprints = @()
     )
 
     $evidence = Get-WindowsBinaryTrustEvidence -BinaryPath $BinaryPath
@@ -703,11 +814,12 @@ function Assert-WindowsBinaryTrust
         }
     }
 
-    Assert-SignerIssuerSha512Thumbprint `
-        -IssuerCertificate $evidence.SignerIssuerCertificate `
-        -ActualThumbprint $evidence.SignerIssuerSha512Thumbprint `
-        -ExpectedThumbprints $ExpectedIssuerSha512Thumbprints
+    $issuerTrustMatch = Assert-SignerIssuerTrust `
+        -Evidence $evidence `
+        -ExpectedIssuerThumbprints $ExpectedIssuerSha512Thumbprints `
+        -ExpectedParentIssuerThumbprints $ExpectedParentIssuerSha512Thumbprints
 
+    Add-Member -InputObject $evidence -NotePropertyName SignerIssuerTrustMatch -NotePropertyValue $issuerTrustMatch -Force
     Write-Verbose "Windows binary trust verification succeeded for '$($evidence.BinaryPath)'."
     return $evidence
 }
@@ -949,7 +1061,7 @@ function Invoke-KustoCliInstall
         if ($Quality -ne 'Dev')
         {
             Invoke-StatusStep -Message 'Verifying asset provenance' -Action {
-                $null = Assert-WindowsBinaryTrust -BinaryPath $downloadedBinaryPath -ExpectedSubject $ExpectedSignerSubject -ExpectedIssuerSha512Thumbprints $ExpectedSignerIssuerSha512Thumbprints
+                $null = Assert-WindowsBinaryTrust -BinaryPath $downloadedBinaryPath -ExpectedSubject $ExpectedSignerSubject -ExpectedIssuerSha512Thumbprints $ExpectedSignerIssuerSha512Thumbprints -ExpectedParentIssuerSha512Thumbprints $ExpectedSignerParentIssuerSha512Thumbprints
             }
         }
         else

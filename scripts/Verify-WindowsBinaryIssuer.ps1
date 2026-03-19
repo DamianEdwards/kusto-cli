@@ -26,12 +26,23 @@ Write-Verbose "Loading installer trust helpers from '$installerScriptPath'."
 
 $config = Get-KustoInstallerTrustConfiguration
 $expectedThumbprints = @($config.ExpectedSignerIssuerSha512Thumbprints)
+$expectedParentThumbprints = @($config.ExpectedSignerParentIssuerSha512Thumbprints)
 $evidence = Get-WindowsBinaryTrustEvidence -BinaryPath $binaryPath
 
-Assert-SignerIssuerSha512Thumbprint `
-    -IssuerCertificate $evidence.SignerIssuerCertificate `
-    -ActualThumbprint $evidence.SignerIssuerSha512Thumbprint `
-    -ExpectedThumbprints $expectedThumbprints
+$issuerTrustMatch = Assert-SignerIssuerTrust `
+    -Evidence $evidence `
+    -ExpectedIssuerThumbprints $expectedThumbprints `
+    -ExpectedParentIssuerThumbprints $expectedParentThumbprints
 
 $formattedExpectedThumbprints = ($expectedThumbprints | ForEach-Object { "'$_'" }) -join ', '
-Write-Host "Verified signer issuer certificate for '$binaryPath': '$($evidence.SignerIssuerCertificate.Subject)' ($($evidence.SignerIssuerSha512Thumbprint)). Allowed SHA512 thumbprints: $formattedExpectedThumbprints."
+$formattedExpectedParentThumbprints = ($expectedParentThumbprints | ForEach-Object { "'$_'" }) -join ', '
+$matchDescription = if ($issuerTrustMatch.UsedFallback)
+{
+    "using parent issuer fallback '$($issuerTrustMatch.Certificate.Subject)' ($($issuerTrustMatch.Sha512Thumbprint))"
+}
+else
+{
+    "using immediate issuer '$($issuerTrustMatch.Certificate.Subject)' ($($issuerTrustMatch.Sha512Thumbprint))"
+}
+
+Write-Host "Verified signer issuer chain for '$binaryPath' $matchDescription. Allowed immediate SHA512 thumbprints: $formattedExpectedThumbprints. Allowed parent SHA512 thumbprints: $formattedExpectedParentThumbprints."
