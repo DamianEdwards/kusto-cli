@@ -404,10 +404,10 @@ Installer behavior:
 
 The installer's Windows provenance logic has two supporting scripts:
 
-- `scripts/Verify-WindowsBinaryIssuer.ps1` reuses the installer's trust helpers and verifies signature validity, certificate-chain/timestamp validity, and the installer's configured issuer thumbprint.
+- `scripts/Verify-WindowsBinaryIssuer.ps1` reuses the installer's trust helpers and verifies signature validity, certificate-chain/timestamp validity, and the installer's configured immediate-issuer and parent-issuer thumbprints.
 - `scripts/Test-InstallerProvenance.ps1` stages positive and negative scenarios so you can make the trust checks fail on demand and inspect them with `-Verbose`.
 
-Use a signed `kusto.exe` from a release when you want to validate the installer's actual expected subject and issuer configuration:
+Use a signed `kusto.exe` from a release when you want to validate the installer's actual expected subject and issuer-thumbprint configuration, including parent-intermediate fallback:
 
 ```powershell
 pwsh .\scripts\Verify-WindowsBinaryIssuer.ps1 -BinaryPath .\artifacts\signed\kusto.exe -Verbose
@@ -449,16 +449,16 @@ pwsh .\scripts\Test-InstallerProvenance.ps1 -Scenario WrongIssuer -BinaryPath $p
 
 Expected outcomes by scenario:
 
-- `InstallerDefaults` succeeds only when the binary matches the installer's configured signer subject and issuer thumbprint.
+- `InstallerDefaults` succeeds only when the binary matches the installer's configured signer subject and either a configured immediate issuer thumbprint or, when needed, a configured parent intermediate issuer thumbprint. Root certificates are never used for fallback.
 - `GoodBinary` succeeds for a valid signed Windows executable when the expected values are taken from that binary.
 - `UnsignedBinary` fails with an Authenticode signature validation error.
 - `TamperedBinary` fails with an Authenticode signature validation error after a single-byte mutation invalidates the signature.
 - `WrongSubject` fails with a signer-subject mismatch.
-- `WrongIssuer` fails with an issuer-thumbprint mismatch.
+- `WrongIssuer` fails when neither the immediate issuer nor the parent intermediate issuer matches the configured allow-lists.
 - `ChecksumMismatch` fails with a `SHA256 mismatch` error.
 - `MetadataMismatch` fails because `release-metadata.json` no longer matches `checksums.txt`.
 
-The harder timestamp or certificate-chain failure cases still need a lab-signed binary or another controlled fixture, but the verbose output from these scripts shows the exact signer, issuer, timestamp, chain elements, and thumbprints involved in each decision.
+The harder timestamp or certificate-chain failure cases still need a lab-signed binary or another controlled fixture, but the verbose output from these scripts shows the exact signer, immediate issuer, parent issuer fallback candidate, timestamp, chain elements, thumbprints, and whether parent-intermediate fallback was attempted.
 
 ## Build and test
 

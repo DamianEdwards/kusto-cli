@@ -25,12 +25,24 @@ Write-Verbose "Loading installer trust helpers from '$installerScriptPath'."
 . $installerScriptPath -NoExecute
 
 $config = Get-KustoInstallerTrustConfiguration
-$expectedThumbprint = $config.ExpectedSignerIssuerSha512Thumbprint
+$expectedThumbprints = @($config.ExpectedSignerIssuerSha512Thumbprints)
+$expectedParentThumbprints = @($config.ExpectedSignerParentIssuerSha512Thumbprints)
 $evidence = Get-WindowsBinaryTrustEvidence -BinaryPath $binaryPath
 
-if (-not [string]::Equals($evidence.SignerIssuerSha512Thumbprint, $expectedThumbprint, [System.StringComparison]::Ordinal))
+$issuerTrustMatch = Assert-SignerIssuerTrust `
+    -Evidence $evidence `
+    -ExpectedIssuerThumbprints $expectedThumbprints `
+    -ExpectedParentIssuerThumbprints $expectedParentThumbprints
+
+$formattedExpectedThumbprints = ($expectedThumbprints | ForEach-Object { "'$_'" }) -join ', '
+$formattedExpectedParentThumbprints = ($expectedParentThumbprints | ForEach-Object { "'$_'" }) -join ', '
+$matchDescription = if ($issuerTrustMatch.UsedFallback)
 {
-    throw "Signer issuer certificate for '$binaryPath' changed. Expected SHA512 '$expectedThumbprint' from '$installerScriptPath', but found '$($evidence.SignerIssuerSha512Thumbprint)' on issuer '$($evidence.SignerIssuerCertificate.Subject)'. If this rotation is intentional, update '$installerScriptPath' to use the new SHA512 thumbprint '$($evidence.SignerIssuerSha512Thumbprint)'."
+    "using parent issuer fallback '$($issuerTrustMatch.Certificate.Subject)' ($($issuerTrustMatch.Sha512Thumbprint))"
+}
+else
+{
+    "using immediate issuer '$($issuerTrustMatch.Certificate.Subject)' ($($issuerTrustMatch.Sha512Thumbprint))"
 }
 
-Write-Host "Verified signer issuer certificate for '$binaryPath': '$($evidence.SignerIssuerCertificate.Subject)' ($($evidence.SignerIssuerSha512Thumbprint))."
+Write-Host "Verified signer issuer chain for '$binaryPath' $matchDescription. Allowed immediate SHA512 thumbprints: $formattedExpectedThumbprints. Allowed parent SHA512 thumbprints: $formattedExpectedParentThumbprints."
