@@ -440,6 +440,50 @@ function Expand-WindowsReleaseArchive
     return $binaryPath
 }
 
+function Invoke-StatusStep
+{
+    param(
+        [Parameter(Mandatory)][string]$Message,
+        [Parameter(Mandatory)][scriptblock]$Action
+    )
+
+    Write-Host "$Message... " -NoNewline
+    & $Action
+    Write-Host 'done'
+}
+
+function Get-ReleaseStatusLabel
+{
+    param(
+        [Parameter(Mandatory)][string]$SelectedQuality,
+        [Parameter(Mandatory)]$Release
+    )
+
+    $releaseLabel =
+        switch ($SelectedQuality)
+        {
+            'Stable' { 'latest stable release' }
+            'PreRelease' { 'latest prerelease' }
+            'Dev' { 'latest development build' }
+            default { 'release' }
+        }
+
+    $releaseVersion = if (-not [string]::IsNullOrWhiteSpace($Release.tag_name))
+    {
+        $Release.tag_name
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($Release.name))
+    {
+        $Release.name
+    }
+    else
+    {
+        'unknown version'
+    }
+
+    return "$releaseLabel ($releaseVersion)"
+}
+
 function Get-ValidatedCertificateChain
 {
     param(
@@ -812,6 +856,7 @@ function Invoke-KustoCliInstall
 
     $release = Get-ReleaseForQuality -Repo $Repository -SelectedQuality $Quality -AssetName $assetName
     Write-Verbose "Selected release '$($release.name)' ($($release.tag_name))."
+    $releaseStatusLabel = Get-ReleaseStatusLabel -SelectedQuality $Quality -Release $release
 
     $asset = Get-ReleaseAsset -Release $release -AssetName $assetName
     if ($null -eq $asset)
@@ -838,8 +883,10 @@ function Invoke-KustoCliInstall
     {
         New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 
-        Write-Verbose "Downloading release asset from '$($asset.browser_download_url)' to '$downloadPath'."
-        Invoke-GitHubAssetDownload -Uri $asset.browser_download_url -OutFile $downloadPath
+        Invoke-StatusStep -Message "Downloading $releaseStatusLabel" -Action {
+            Write-Verbose "Downloading release asset from '$($asset.browser_download_url)' to '$downloadPath'."
+            Invoke-GitHubAssetDownload -Uri $asset.browser_download_url -OutFile $downloadPath
+        }
 
         if ($Quality -ne 'Dev')
         {
@@ -862,14 +909,22 @@ function Invoke-KustoCliInstall
                 Invoke-GitHubAssetDownload -Uri $releaseMetadataAsset.browser_download_url -OutFile $releaseMetadataPath
             }
 
-            $null = Assert-WindowsArchiveIntegrity -ArchivePath $downloadPath -AssetName $assetName -ChecksumsPath $checksumsPath -ReleaseMetadataPath $releaseMetadataPath
+            Invoke-StatusStep -Message 'Verifying asset checksums' -Action {
+                $null = Assert-WindowsArchiveIntegrity -ArchivePath $downloadPath -AssetName $assetName -ChecksumsPath $checksumsPath -ReleaseMetadataPath $releaseMetadataPath
+            }
         }
 
         $downloadedBinaryPath = Expand-WindowsReleaseArchive -ArchivePath $downloadPath -DestinationPath $extractPath
 
         if ($Quality -ne 'Dev')
         {
-            $null = Assert-WindowsBinaryTrust -BinaryPath $downloadedBinaryPath -ExpectedSubject $ExpectedSignerSubject -ExpectedIssuerSha512Thumbprint $ExpectedSignerIssuerSha512Thumbprint
+            Invoke-StatusStep -Message 'Verifying asset provenance' -Action {
+                $null = Assert-WindowsBinaryTrust -BinaryPath $downloadedBinaryPath -ExpectedSubject $ExpectedSignerSubject -ExpectedIssuerSha512Thumbprint $ExpectedSignerIssuerSha512Thumbprint
+            }
+        }
+        else
+        {
+            Write-Host 'Skipping checksum and provenance verification for development build.'
         }
 
         $installDirectory = [System.IO.Path]::GetFullPath($TargetPath)
@@ -895,8 +950,9 @@ function Invoke-KustoCliInstall
 
         if ($shouldInstall)
         {
-            Copy-Item -Path $downloadedBinaryPath -Destination $destinationPath -Force
-            Write-Host "Installed kusto.exe version '$downloadedVersion' to '$installDirectory'."
+            Invoke-StatusStep -Message "Installing $downloadedVersion to '$installDirectory'" -Action {
+                Copy-Item -Path $downloadedBinaryPath -Destination $destinationPath -Force
+            }
         }
 
         if ($UpdatePath)

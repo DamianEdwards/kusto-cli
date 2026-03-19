@@ -394,6 +394,7 @@ Installer behavior:
 - Supports `-Quality Dev|PreRelease|Stable` (default: `Stable`)
 - Supports `-TargetPath` (default: `%USERPROFILE%\.kusto\bin`)
 - Supports `-UpdatePath` (default: `true`)
+- Prints concise progress messages by default during download, verification, and install
 - Supports `-Verbose` for opt-in download and provenance diagnostics
 - Replaces existing `kusto.exe` only when the downloaded version is newer
 - Updates current-session and user PATH to include the target directory when `-UpdatePath` is `true`
