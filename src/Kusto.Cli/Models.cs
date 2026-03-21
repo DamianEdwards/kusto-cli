@@ -53,6 +53,14 @@ public sealed class TabularData(IReadOnlyList<string> columns, IReadOnlyList<IRe
     }
 }
 
+public sealed class TableSchemaDetails
+{
+    public Dictionary<string, string?> Properties { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public TabularData Columns { get; init; } = TabularData.Empty;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? NotesMessage { get; init; }
+}
+
 public sealed class QueryExecutionResult(
     TabularData table,
     string? webExplorerUrl,
@@ -200,6 +208,12 @@ public sealed class SchemaCacheOverride
     public int TtlSeconds { get; set; } = SchemaCacheSettingsResolver.DefaultTtlSeconds;
 }
 
+public sealed class OfflineTableDataExport
+{
+    public int FormatVersion { get; set; } = 1;
+    public List<DatabaseSchemaCacheEntry> Entries { get; set; } = [];
+}
+
 public sealed class ResolvedCluster(string? name, string url)
 {
     public string? Name { get; } = name;
@@ -246,7 +260,7 @@ internal sealed class ParsedKustoTable(string? tableName, string? tableKind, IRe
     public IReadOnlyList<IReadOnlyList<string?>> Rows { get; } = rows;
 }
 
-internal sealed class DatabaseSchemaCacheEntry
+public sealed class DatabaseSchemaCacheEntry
 {
     public int CacheFormatVersion { get; set; } = 1;
     public string ClusterUrl { get; set; } = string.Empty;
@@ -254,6 +268,7 @@ internal sealed class DatabaseSchemaCacheEntry
     public DateTimeOffset CachedAtUtc { get; set; }
     public string? SchemaVersion { get; set; }
     public string SchemaJson { get; set; } = string.Empty;
+    public Dictionary<string, List<string>> TableNotes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 internal enum QueryChartKind

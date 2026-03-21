@@ -25,13 +25,15 @@ There is no separate lint command configured in this repository.
 
 ### 2) Runtime composition and execution flow
 - `src/Kusto.Cli/CliRunner.cs` is the command execution wrapper: it parses common options (`--format`, `--log-level`), constructs runtime dependencies, formats output, and centralizes error handling.
-- `CliRunner.CreateRuntime(...)` wires `FileConfigStore`, `KustoConnectionResolver`, `AzureTokenProvider`, `KustoHttpService`, and `OutputFormatter` into a `CliRuntime`.
-- `src/Kusto.Cli/Contracts.cs` defines the core interfaces (`IConfigStore`, `IKustoService`, `IKustoConnectionResolver`, `IOutputFormatter`) and `CliRuntime` container.
+- `CliRunner.CreateRuntime(...)` wires `FileConfigStore`, `KustoConnectionResolver`, `AzureTokenProvider`, `KustoHttpService`, `OfflineTableDataStore`, `TableSchemaProvider`, `TableOfflineDataManager`, the confirmation prompt, and `OutputFormatter` into a `CliRuntime`.
+- `src/Kusto.Cli/Contracts.cs` defines the core interfaces (`IConfigStore`, `IKustoService`, `IKustoConnectionResolver`, `ITableSchemaProvider`, `ITableOfflineDataManager`, `IConfirmationPrompt`, `IOutputFormatter`) and the `CliRuntime` container.
 
 ### 3) Data/config and connection resolution
 - `src/Kusto.Cli/FileConfigStore.cs` persists config to `%USERPROFILE%\.kusto\config.json` (or `KUSTO_CONFIG_PATH` override).
 - `src/Kusto.Cli/ClusterUtilities.cs` normalizes cluster URLs and config values; defaults and lookups rely on normalized URLs.
 - `src/Kusto.Cli/KustoConnectionResolver.cs` resolves effective cluster/database from explicit options or configured defaults.
+- `src/Kusto.Cli/OfflineTableDataStore.cs` persists offline table data per normalized cluster/database in the schema-cache directory; each entry can hold cached schema JSON plus per-table notes.
+- `src/Kusto.Cli/TableSchemaProvider.cs` reads/refreshes cached schema data for `table show`, while `src/Kusto.Cli/TableOfflineDataManager.cs` owns notes and offline-data import/export/purge/clear flows.
 
 ### 4) Kusto transport layer
 - `src/Kusto.Cli/KustoHttpService.cs` calls Kusto REST endpoints:
@@ -81,7 +83,16 @@ There is no separate lint command configured in this repository.
    - Command handlers should return `CliOutput` (`Message`, `Properties`, `Table`) and rely on `OutputFormatter`.
    - Prefer returning structured data and let formatter handle rendering differences across output modes.
 
-6. **Chart compatibility rules are centralized**
+6. **Offline table data is keyed by normalized cluster URL + database**
+   - Reuse the schema-cache directory and normalize cluster URLs before persisting or looking up offline table data.
+   - `table show` should render table metadata in `Properties`, column details in `Table`, and surface stored notes in the text output.
+   - Table notes are stored per table with sequential IDs derived from list order; do not invent separate GUID-style note identifiers.
+
+7. **Destructive offline-data actions must confirm unless forced**
+   - `table notes --clear`, `table --purge-offline-data`, and `table --clear-offline-data` should prompt unless `--force` is supplied.
+   - Keep destructive-operation prompts explicit and route behavior through the confirmation prompt abstraction rather than ad-hoc console reads in command handlers.
+
+8. **Chart compatibility rules are centralized**
    - Always route render-kind and layout decisions through `KustoChartCompatibilityAnalyzer`; do not duplicate chart compatibility logic in command handlers or formatters.
    - Current render-kind mapping is:
      - `columnchart` => `QueryChartKind.Column`
@@ -90,13 +101,13 @@ There is no separate lint command configured in this repository.
      - `piechart` => `QueryChartKind.Pie`
    - Any other Kusto render kind should surface an explicit "not supported" reason rather than silently falling back.
 
-7. **Human vs markdown chart support differs intentionally**
+9. **Human vs markdown chart support differs intentionally**
    - Terminal (`human` + `--chart`) currently supports `columnchart`, `barchart`, `linechart`/`timechart`, and `piechart`.
    - Markdown (`markdown`/`md` + `--chart`) supports those same chart kinds.
    - `piechart` terminal output should render via Hex1b's donut/pie support and include a legend with values/percentages when feasible.
    - Mermaid cartesian output currently requires `Simple` layout and exactly one series; if the chart can't be represented faithfully, preserve the table and emit the markdown reason instead of approximating.
 
-8. **Layout support is chart-kind specific**
+10. **Layout support is chart-kind specific**
    - For line charts, supported human layouts are `default`/`unstacked`, `stacked`, and `stacked100`.
    - For column/bar charts, supported human layouts are `default`/`unstacked`, `grouped`, `stacked`, and `stacked100`.
    - Invalid or unsupported layouts must fail compatibility analysis with a clear reason before rendering.

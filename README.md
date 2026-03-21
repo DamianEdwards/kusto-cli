@@ -18,7 +18,7 @@ Grab the relevant executable asset from the latest [release](https://github.com/
 
 - Manage known clusters (`cluster` command group)
 - Manage databases and defaults (`database` command group)
-- Browse tables and schemas (`table` command group)
+- Browse tables, schema details, and offline table data (`table` command group)
 - Run KQL from inline text, files, or stdin (`query`)
 - Show copy/paste-ready examples and aliases (`examples`)
 - Include Azure Data Explorer Web Explorer deeplinks in query results
@@ -27,7 +27,7 @@ Grab the relevant executable asset from the latest [release](https://github.com/
 - Show optional query execution statistics with `--show-stats`
 - Basic public, US Government, and China cloud support for token audience selection and Web Explorer links
 - Multiple output formats (`human`, `json`, `markdown`/`md`)
-- Optional table schema caching with TTL-based revalidation for repeated `table show` calls
+- Optional offline table data with TTL-based schema revalidation, per-table notes, and import/export support
 - Configurable log verbosity with structured console/file logging
 - GitHub Actions workflows for PR validation, versioned native release assets, and release promotion
 
@@ -199,9 +199,11 @@ Line chart example:
 
 If a query returns visualization metadata but `--chart` is omitted, the CLI will hint when the result is compatible with terminal chart rendering. If a render kind or layout can't be mapped faithfully to Hex1b or Mermaid, the CLI will keep the table output and show an explanatory message instead.
 
-## Schema cache
+## Offline table data
 
-`table show` uses an on-disk schema cache by default for repeated schema discovery. For configuration, cache locations, disable/override behavior, and usage examples, see [docs/schema-cache.md](docs/schema-cache.md).
+`table show` uses on-disk offline table data by default for repeated schema discovery. The CLI caches database schema snapshots, revalidates expired entries with `.show database ['<db>'] schema if_later_than "<version>" as json`, includes table and column docstrings in `table show`, and lets you attach per-table notes that are echoed back in `table show`.
+
+For configuration, cache locations, disable/override behavior, and offline-data management examples, see [docs/schema-cache.md](docs/schema-cache.md).
 
 ## Global options
 
@@ -227,8 +229,10 @@ These options are available on all commands:
 | `database list` | List databases in a cluster. | none | `--cluster`, `--filter`, `--take`, global options |
 | `database show <database>` | Show details for one database. | `database` | `--cluster`, global options |
 | `database set-default <database>` | Set default database for a cluster. | `database` | `--cluster`, global options |
+| `table [<table>]` | Manage offline table data at the root command level. | optional `table` | `--export-offline-data`, `--import-offline-data`, `--purge-offline-data`, `--clear-offline-data`, `--cluster`, `--database`, `--force`, global options |
 | `table list` | List tables in a database. | none | `--cluster`, `--database`, `--filter`, `--take`, global options |
-| `table show <table>` | Show schema/details for one table. | `table` | `--cluster`, `--database`, global options |
+| `table show <table>` | Show table details, column schema, docstrings, and stored notes. | `table` | `--cluster`, `--database`, `--refresh-offline-data`, global options |
+| `table notes [<table>]` | List, add, delete, or clear table notes. | optional `table` | `--cluster`, `--database`, `--add`, `--id`, `--delete`, `--clear`, `--force`, global options |
 | `query [<query>]` | Run KQL from inline text, file, or stdin. | optional `query` | `--file`, `--cluster`, `--database`, `--chart`, `--show-stats`, global options |
 
 ## Command-specific option details
@@ -239,6 +243,16 @@ These options are available on all commands:
 | `--database <database>` | `table *`, `query` | Database to use. Alias: `--db`. If omitted, default DB for selected cluster is used. |
 | `--filter <value>` | `database list`, `table list` | Name filter. Supports contains/startswith/endswith semantics using anchors (see below). |
 | `--take <int>` | `database list`, `table list` | Limits number of rows returned. Alias: `--limit`. Must be a positive integer. |
+| `--refresh-offline-data` | `table show` | Force a live schema refresh and update the local offline table data. Alias: `-r`. |
+| `--add <note>` | `table notes <table>` | Add a note for the specified table. Alias: `-a`. |
+| `--id <int>` | `table notes <table>` | Show a specific note by its sequential ID. |
+| `--delete <int>` | `table notes <table>` | Delete a specific note by its sequential ID. Alias: `-d`. |
+| `--clear` | `table notes`, `table [<table>]` | Clear table notes or clear offline table data, depending on the command context. Alias: `-c`. |
+| `--export-offline-data <path>` | `table` | Export all offline table data to JSON. |
+| `--import-offline-data <path>` | `table` | Import offline table data from JSON. |
+| `--purge-offline-data` | `table` | Remove offline data for tables that no longer exist. Alias: `-p`. |
+| `--clear-offline-data` | `table [<table>]` | Clear offline data for one table or for all tables. Alias: `-c`. |
+| `--force` | destructive `table` / `table notes` actions | Skip the confirmation prompt when clearing or purging offline data. Alias: `-f`. |
 | `--use` | `cluster add` | Also set the added cluster as the active/default cluster. |
 | `--file <path>` | `query` | Read query text from file. Alias: `-f`. Cannot be combined with inline query argument. |
 | `--chart` | `query` | Render compatible query results as a chart for `human` or `markdown` output. Not supported with `json`. |
@@ -261,7 +275,13 @@ Canonical command names are used in the examples above. These aliases are still 
 | `set-default` | `use` |
 | `--database` | `--db` |
 | `--take` | `--limit` |
+| `--refresh-offline-data` | `-r` |
+| `--add` | `-a` |
+| `--delete` | `-d` |
+| `--clear`, `--clear-offline-data` | `-c` |
+| `--purge-offline-data` | `-p` |
 | `--file` | `-f` |
+| `--force` | `-f` |
 
 ### `--filter` semantics
 
@@ -317,6 +337,23 @@ kusto table list --cluster help --database Samples --filter "^Storm" --take 10
 
 # Show a specific table schema/details
 kusto table show StormEvents --cluster help --database Samples
+
+# Force a live refresh of the cached table details
+kusto table show StormEvents --cluster help --database Samples --refresh-offline-data
+
+# Add and inspect table notes
+kusto table notes StormEvents --cluster help --database Samples --add "Use this table for weather samples."
+kusto table notes StormEvents --cluster help --database Samples
+
+# Delete a specific note or clear notes
+kusto table notes StormEvents --cluster help --database Samples --delete 1
+kusto table notes --clear --force
+
+# Export/import or clear offline data
+kusto table --export-offline-data .\offline-table-data.json
+kusto table --import-offline-data .\offline-table-data.json
+kusto table StormEvents --cluster help --database Samples --clear-offline-data --force
+kusto table --purge-offline-data --force
 ```
 
 ### Query command

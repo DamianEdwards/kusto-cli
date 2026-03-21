@@ -42,19 +42,66 @@ public interface IOutputFormatter
 
 public interface ITableSchemaProvider
 {
-    Task<Dictionary<string, string?>> GetTablePropertiesAsync(
+    Task<TableSchemaDetails> GetTableSchemaDetailsAsync(
         KustoConfig config,
         string clusterUrl,
         string database,
         string tableName,
+        bool refreshOfflineData,
         CancellationToken cancellationToken);
 }
 
-public enum OutputFormat
+public interface ITableOfflineDataManager
 {
-    Human,
-    Json,
-    Markdown
+    Task<CliOutput> ShowTableNotesAsync(
+        KustoConfig config,
+        string clusterUrl,
+        string database,
+        string tableName,
+        int? noteId,
+        CancellationToken cancellationToken);
+    Task<CliOutput> AddTableNoteAsync(
+        KustoConfig config,
+        string clusterUrl,
+        string database,
+        string tableName,
+        string note,
+        CancellationToken cancellationToken);
+    Task<CliOutput> DeleteTableNoteAsync(
+        KustoConfig config,
+        string clusterUrl,
+        string database,
+        string tableName,
+        int noteId,
+        CancellationToken cancellationToken);
+    Task<CliOutput> ClearTableNotesAsync(
+        KustoConfig config,
+        string? clusterUrl,
+        string? database,
+        string? tableName,
+        CancellationToken cancellationToken);
+    Task<CliOutput> ExportOfflineDataAsync(
+        KustoConfig config,
+        string filePath,
+        CancellationToken cancellationToken);
+    Task<CliOutput> ImportOfflineDataAsync(
+        KustoConfig config,
+        string filePath,
+        CancellationToken cancellationToken);
+    Task<CliOutput> PurgeOfflineDataAsync(
+        KustoConfig config,
+        CancellationToken cancellationToken);
+    Task<CliOutput> ClearOfflineDataAsync(
+        KustoConfig config,
+        string? clusterUrl,
+        string? database,
+        string? tableName,
+        CancellationToken cancellationToken);
+}
+
+public interface IConfirmationPrompt
+{
+    Task<bool> ConfirmAsync(string prompt, CancellationToken cancellationToken);
 }
 
 public sealed class CliRuntime(
@@ -65,6 +112,8 @@ public sealed class CliRuntime(
     IKustoConnectionResolver connectionResolver,
     IKustoService kustoService,
     ITableSchemaProvider tableSchemaProvider,
+    ITableOfflineDataManager tableOfflineDataManager,
+    IConfirmationPrompt confirmationPrompt,
     IOutputFormatter outputFormatter) : IDisposable
 {
     public ILoggerFactory LoggerFactory { get; } = loggerFactory;
@@ -74,6 +123,8 @@ public sealed class CliRuntime(
     public IKustoConnectionResolver ConnectionResolver { get; } = connectionResolver;
     public IKustoService KustoService { get; } = kustoService;
     public ITableSchemaProvider TableSchemaProvider { get; } = tableSchemaProvider;
+    public ITableOfflineDataManager TableOfflineDataManager { get; } = tableOfflineDataManager;
+    public IConfirmationPrompt ConfirmationPrompt { get; } = confirmationPrompt;
     public IOutputFormatter OutputFormatter { get; } = outputFormatter;
 
     public void Dispose()
@@ -81,4 +132,11 @@ public sealed class CliRuntime(
         HttpClient.Dispose();
         LoggerFactory.Dispose();
     }
+}
+
+public enum OutputFormat
+{
+    Human,
+    Json,
+    Markdown
 }

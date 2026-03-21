@@ -385,27 +385,196 @@ public static class CommandFactory
 
     private static Command BuildTableCommand(Option<string> formatOption, Option<string?> logLevelOption)
     {
-        var clusterOption = CreateClusterOption();
+        var rootTableArgument = new Argument<string?>("table")
+        {
+            Description = "Table name.",
+            Arity = ArgumentArity.ZeroOrOne
+        };
+        var rootClusterOption = CreateClusterOption();
+        var rootDatabaseOption = CreateDatabaseOption();
+        var exportOfflineDataOption = CreateOfflineDataFileOption("--export-offline-data", "Export all offline table data to a JSON file.");
+        var importOfflineDataOption = CreateOfflineDataFileOption("--import-offline-data", "Import offline table data from a JSON file.");
+        var purgeOfflineDataOption = new Option<bool>("--purge-offline-data")
+        {
+            Description = "Purge offline data for tables that no longer exist. Alias: -p."
+        };
+        purgeOfflineDataOption.Aliases.Add("-p");
+        var clearOfflineDataOption = new Option<bool>("--clear-offline-data")
+        {
+            Description = "Clear offline data for one table or all tables. Alias: -c."
+        };
+        clearOfflineDataOption.Aliases.Add("-c");
+        var rootForceOption = CreateForceOption("Skip the confirmation prompt for destructive offline-data operations.");
 
-        var databaseOption = CreateDatabaseOption();
+        var listClusterOption = CreateClusterOption();
+        var listDatabaseOption = CreateDatabaseOption();
         var filterOption = CreateFilterOption("table");
         var takeOption = CreateTakeOption("tables");
 
+        var showTableArgument = new Argument<string>("table")
+        {
+            Description = "Table name."
+        };
+        var showClusterOption = CreateClusterOption();
+        var showDatabaseOption = CreateDatabaseOption();
+        var refreshOfflineDataOption = new Option<bool>("--refresh-offline-data")
+        {
+            Description = "Fetch the latest table schema and update local offline data. Alias: -r."
+        };
+        refreshOfflineDataOption.Aliases.Add("-r");
+
+        var notesTableArgument = new Argument<string?>("table")
+        {
+            Description = "Table name.",
+            Arity = ArgumentArity.ZeroOrOne
+        };
+        var notesClusterOption = CreateClusterOption();
+        var notesDatabaseOption = CreateDatabaseOption();
+        var addNoteOption = new Option<string?>("--add")
+        {
+            Description = "Add a note for the specified table. Alias: -a."
+        };
+        addNoteOption.Aliases.Add("-a");
+        var noteIdOption = new Option<int?>("--id")
+        {
+            Description = "Show a specific note by its sequential ID."
+        };
+        var deleteNoteOption = new Option<int?>("--delete")
+        {
+            Description = "Delete a note by its sequential ID. Alias: -d."
+        };
+        deleteNoteOption.Aliases.Add("-d");
+        var clearNotesOption = new Option<bool>("--clear")
+        {
+            Description = "Clear notes for one table or all tables. Alias: -c."
+        };
+        clearNotesOption.Aliases.Add("-c");
+        var notesForceOption = CreateForceOption("Skip the confirmation prompt when clearing notes.");
+
         var tableCommand = new Command("table", "Browse tables and inspect schema.");
         tableCommand.Aliases.Add("tables");
+        tableCommand.Add(rootTableArgument);
+        tableCommand.Add(rootClusterOption);
+        tableCommand.Add(rootDatabaseOption);
+        tableCommand.Add(exportOfflineDataOption);
+        tableCommand.Add(importOfflineDataOption);
+        tableCommand.Add(purgeOfflineDataOption);
+        tableCommand.Add(clearOfflineDataOption);
+        tableCommand.Add(rootForceOption);
+        tableCommand.SetAction((parseResult, cancellationToken) =>
+        {
+            var tableName = parseResult.GetValue(rootTableArgument);
+            var clusterReference = parseResult.GetValue(rootClusterOption);
+            var databaseName = parseResult.GetValue(rootDatabaseOption);
+            var exportFile = parseResult.GetValue(exportOfflineDataOption);
+            var importFile = parseResult.GetValue(importOfflineDataOption);
+            var purgeOfflineData = parseResult.GetValue(purgeOfflineDataOption);
+            var clearOfflineData = parseResult.GetValue(clearOfflineDataOption);
+            var force = parseResult.GetValue(rootForceOption);
+            var format = parseResult.GetRequiredValue(formatOption);
+            var logLevel = parseResult.GetValue(logLevelOption);
+
+            return CliRunner.RunAsync(format, logLevel, async (runtime, ct) =>
+            {
+                var selectedActionCount = CountSpecified(
+                    exportFile is not null,
+                    importFile is not null,
+                    purgeOfflineData,
+                    clearOfflineData);
+
+                if (selectedActionCount == 0)
+                {
+                    if (!string.IsNullOrWhiteSpace(tableName))
+                    {
+                        throw new UserFacingException($"Use 'kusto table show {tableName}' to inspect a table or add --clear-offline-data to remove cached data.");
+                    }
+
+                    throw new UserFacingException("Specify a table subcommand or an offline-data option.");
+                }
+
+                if (selectedActionCount > 1)
+                {
+                    throw new UserFacingException("Specify only one offline-data action at a time.");
+                }
+
+                if (force && !purgeOfflineData && !clearOfflineData)
+                {
+                    throw new UserFacingException("--force can only be used with --purge-offline-data or --clear-offline-data.");
+                }
+
+                var config = await runtime.ConfigStore.LoadAsync(ct);
+
+                if (exportFile is not null)
+                {
+                    EnsureNoScopedTableOptions(tableName, clusterReference, databaseName, "--export-offline-data");
+                    return await runtime.TableOfflineDataManager.ExportOfflineDataAsync(config, exportFile.FullName, ct);
+                }
+
+                if (importFile is not null)
+                {
+                    EnsureNoScopedTableOptions(tableName, clusterReference, databaseName, "--import-offline-data");
+                    return await runtime.TableOfflineDataManager.ImportOfflineDataAsync(config, importFile.FullName, ct);
+                }
+
+                if (purgeOfflineData)
+                {
+                    EnsureNoScopedTableOptions(tableName, clusterReference, databaseName, "--purge-offline-data");
+                    if (!force && !await runtime.ConfirmationPrompt.ConfirmAsync("Purge offline data for tables that no longer exist?", ct))
+                    {
+                        return new CliOutput { Message = "Operation cancelled." };
+                    }
+
+                    return await runtime.TableOfflineDataManager.PurgeOfflineDataAsync(config, ct);
+                }
+
+                if (!clearOfflineData)
+                {
+                    throw new UserFacingException("Specify an offline-data action to run.");
+                }
+
+                if (string.IsNullOrWhiteSpace(tableName))
+                {
+                    if (!string.IsNullOrWhiteSpace(clusterReference) || !string.IsNullOrWhiteSpace(databaseName))
+                    {
+                        throw new UserFacingException("--cluster and --database can only be used with --clear-offline-data when a table name is provided.");
+                    }
+
+                    if (!force && !await runtime.ConfirmationPrompt.ConfirmAsync("Clear all offline table data?", ct))
+                    {
+                        return new CliOutput { Message = "Operation cancelled." };
+                    }
+
+                    return await runtime.TableOfflineDataManager.ClearOfflineDataAsync(config, null, null, null, ct);
+                }
+
+                var resolvedCluster = runtime.ConnectionResolver.ResolveCluster(config, clusterReference);
+                var resolvedDatabase = runtime.ConnectionResolver.ResolveDatabase(config, resolvedCluster.Url, databaseName);
+                if (!force && !await runtime.ConfirmationPrompt.ConfirmAsync($"Clear offline data for table '{tableName}'?", ct))
+                {
+                    return new CliOutput { Message = "Operation cancelled." };
+                }
+
+                return await runtime.TableOfflineDataManager.ClearOfflineDataAsync(
+                    config,
+                    resolvedCluster.Url,
+                    resolvedDatabase,
+                    tableName,
+                    ct);
+            }, cancellationToken);
+        });
 
         var listCommand = new Command("list", "List tables in a database. Use --filter or --limit to narrow results.")
         {
-            clusterOption,
-            databaseOption,
+            listClusterOption,
+            listDatabaseOption,
             filterOption,
             takeOption
         };
         listCommand.Aliases.Add("ls");
         listCommand.SetAction((parseResult, cancellationToken) =>
         {
-            var clusterReference = parseResult.GetValue(clusterOption);
-            var databaseName = parseResult.GetValue(databaseOption);
+            var clusterReference = parseResult.GetValue(listClusterOption);
+            var databaseName = parseResult.GetValue(listDatabaseOption);
             var filterValue = parseResult.GetValue(filterOption);
             var takeValue = parseResult.GetValue(takeOption);
             var format = parseResult.GetRequiredValue(formatOption);
@@ -433,24 +602,21 @@ public static class CommandFactory
             }, cancellationToken);
         });
 
-        var tableArgument = new Argument<string>("table")
-        {
-            Description = "Table name."
-        };
-
         var showCommand = new Command("show", "Show table schema and column details.")
         {
-            tableArgument,
-            clusterOption,
-            databaseOption
+            showTableArgument,
+            showClusterOption,
+            showDatabaseOption,
+            refreshOfflineDataOption
         };
         showCommand.Aliases.Add("get");
         showCommand.Aliases.Add("schema");
         showCommand.SetAction((parseResult, cancellationToken) =>
         {
-            var tableName = parseResult.GetRequiredValue(tableArgument);
-            var clusterReference = parseResult.GetValue(clusterOption);
-            var databaseName = parseResult.GetValue(databaseOption);
+            var tableName = parseResult.GetRequiredValue(showTableArgument);
+            var clusterReference = parseResult.GetValue(showClusterOption);
+            var databaseName = parseResult.GetValue(showDatabaseOption);
+            var refreshOfflineData = parseResult.GetValue(refreshOfflineDataOption);
             var format = parseResult.GetRequiredValue(formatOption);
             var logLevel = parseResult.GetValue(logLevelOption);
 
@@ -459,21 +625,164 @@ public static class CommandFactory
                 var config = await runtime.ConfigStore.LoadAsync(ct);
                 var resolvedCluster = runtime.ConnectionResolver.ResolveCluster(config, clusterReference);
                 var resolvedDatabase = runtime.ConnectionResolver.ResolveDatabase(config, resolvedCluster.Url, databaseName);
+                var details = await runtime.TableSchemaProvider.GetTableSchemaDetailsAsync(
+                    config,
+                    resolvedCluster.Url,
+                    resolvedDatabase,
+                    tableName,
+                    refreshOfflineData,
+                    ct);
 
                 return new CliOutput
                 {
-                    Properties = await runtime.TableSchemaProvider.GetTablePropertiesAsync(
+                    Message = details.NotesMessage,
+                    Properties = details.Properties,
+                    Table = details.Columns
+                };
+            }, cancellationToken);
+        });
+
+        var notesCommand = new Command("notes", "Manage extra notes associated with a table.")
+        {
+            notesTableArgument,
+            notesClusterOption,
+            notesDatabaseOption,
+            addNoteOption,
+            noteIdOption,
+            deleteNoteOption,
+            clearNotesOption,
+            notesForceOption
+        };
+        notesCommand.SetAction((parseResult, cancellationToken) =>
+        {
+            var tableName = parseResult.GetValue(notesTableArgument);
+            var clusterReference = parseResult.GetValue(notesClusterOption);
+            var databaseName = parseResult.GetValue(notesDatabaseOption);
+            var addNote = parseResult.GetValue(addNoteOption);
+            var noteId = parseResult.GetValue(noteIdOption);
+            var deleteNote = parseResult.GetValue(deleteNoteOption);
+            var clearNotes = parseResult.GetValue(clearNotesOption);
+            var force = parseResult.GetValue(notesForceOption);
+            var format = parseResult.GetRequiredValue(formatOption);
+            var logLevel = parseResult.GetValue(logLevelOption);
+
+            return CliRunner.RunAsync(format, logLevel, async (runtime, ct) =>
+            {
+                var selectedActionCount = CountSpecified(
+                    addNote is not null,
+                    noteId is not null,
+                    deleteNote is not null,
+                    clearNotes);
+
+                if (selectedActionCount > 1)
+                {
+                    throw new UserFacingException("Specify only one notes action at a time.");
+                }
+
+                if (force && !clearNotes)
+                {
+                    throw new UserFacingException("--force can only be used with --clear.");
+                }
+
+                if (selectedActionCount == 0 && string.IsNullOrWhiteSpace(tableName))
+                {
+                    throw new UserFacingException("Specify a table name or use --clear to clear all table notes.");
+                }
+
+                if (string.IsNullOrWhiteSpace(tableName))
+                {
+                    if (addNote is not null || noteId is not null || deleteNote is not null)
+                    {
+                        throw new UserFacingException("A table name is required for --add, --id, and --delete.");
+                    }
+
+                    if (!clearNotes)
+                    {
+                        throw new UserFacingException("Specify a table name or use --clear to clear all table notes.");
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(clusterReference) || !string.IsNullOrWhiteSpace(databaseName))
+                    {
+                        throw new UserFacingException("--cluster and --database can only be used when a table name is provided.");
+                    }
+                }
+
+                var config = await runtime.ConfigStore.LoadAsync(ct);
+
+                if (clearNotes && string.IsNullOrWhiteSpace(tableName))
+                {
+                    if (!force && !await runtime.ConfirmationPrompt.ConfirmAsync("Clear all table notes?", ct))
+                    {
+                        return new CliOutput { Message = "Operation cancelled." };
+                    }
+
+                    return await runtime.TableOfflineDataManager.ClearTableNotesAsync(config, null, null, null, ct);
+                }
+
+                var resolvedCluster = runtime.ConnectionResolver.ResolveCluster(config, clusterReference);
+                var resolvedDatabase = runtime.ConnectionResolver.ResolveDatabase(config, resolvedCluster.Url, databaseName);
+
+                if (addNote is not null)
+                {
+                    return await runtime.TableOfflineDataManager.AddTableNoteAsync(
+                        config,
+                        resolvedCluster.Url,
+                        resolvedDatabase,
+                        tableName!,
+                        addNote,
+                        ct);
+                }
+
+                if (noteId is not null)
+                {
+                    return await runtime.TableOfflineDataManager.ShowTableNotesAsync(
+                        config,
+                        resolvedCluster.Url,
+                        resolvedDatabase,
+                        tableName!,
+                        noteId,
+                        ct);
+                }
+
+                if (deleteNote is not null)
+                {
+                    return await runtime.TableOfflineDataManager.DeleteTableNoteAsync(
+                        config,
+                        resolvedCluster.Url,
+                        resolvedDatabase,
+                        tableName!,
+                        deleteNote.Value,
+                        ct);
+                }
+
+                if (clearNotes)
+                {
+                    if (!force && !await runtime.ConfirmationPrompt.ConfirmAsync($"Clear all notes for table '{tableName}'?", ct))
+                    {
+                        return new CliOutput { Message = "Operation cancelled." };
+                    }
+
+                    return await runtime.TableOfflineDataManager.ClearTableNotesAsync(
                         config,
                         resolvedCluster.Url,
                         resolvedDatabase,
                         tableName,
-                        ct)
-                };
+                        ct);
+                }
+
+                return await runtime.TableOfflineDataManager.ShowTableNotesAsync(
+                    config,
+                    resolvedCluster.Url,
+                    resolvedDatabase,
+                    tableName!,
+                    null,
+                    ct);
             }, cancellationToken);
         });
 
         tableCommand.Add(listCommand);
         tableCommand.Add(showCommand);
+        tableCommand.Add(notesCommand);
         return tableCommand;
     }
 
@@ -654,6 +963,24 @@ public static class CommandFactory
         return option;
     }
 
+    private static Option<FileInfo?> CreateOfflineDataFileOption(string name, string description)
+    {
+        return new Option<FileInfo?>(name)
+        {
+            Description = description
+        };
+    }
+
+    private static Option<bool> CreateForceOption(string description)
+    {
+        var option = new Option<bool>("--force")
+        {
+            Description = $"{description} Alias: -f."
+        };
+        option.Aliases.Add("-f");
+        return option;
+    }
+
     private static int GetPreferredColumnIndex(TabularData table, string preferredColumnName)
     {
         if (table.TryGetColumnIndex(preferredColumnName, out var index))
@@ -685,5 +1012,20 @@ public static class CommandFactory
     private static string EscapeKustoLiteral(string input)
     {
         return KustoCommandText.EscapeSingleQuotedLiteral(input);
+    }
+
+    private static int CountSpecified(params bool[] values)
+    {
+        return values.Count(value => value);
+    }
+
+    private static void EnsureNoScopedTableOptions(string? tableName, string? clusterReference, string? databaseName, string optionName)
+    {
+        if (!string.IsNullOrWhiteSpace(tableName) ||
+            !string.IsNullOrWhiteSpace(clusterReference) ||
+            !string.IsNullOrWhiteSpace(databaseName))
+        {
+            throw new UserFacingException($"{optionName} can't be combined with a table name, --cluster, or --database.");
+        }
     }
 }
