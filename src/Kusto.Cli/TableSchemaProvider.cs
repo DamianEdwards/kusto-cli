@@ -1,101 +1,138 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
 namespace Kusto.Cli;
 
 public sealed class TableSchemaProvider(
     IKustoService kustoService,
+    OfflineTableDataStore offlineTableDataStore,
     SchemaCacheSettingsResolver settingsResolver,
     ILogger<TableSchemaProvider> logger,
     TimeProvider? timeProvider = null) : ITableSchemaProvider
 {
-    private const int CacheFormatVersion = 1;
-
     private readonly IKustoService _kustoService = kustoService;
+    private readonly OfflineTableDataStore _offlineTableDataStore = offlineTableDataStore;
     private readonly SchemaCacheSettingsResolver _settingsResolver = settingsResolver;
     private readonly ILogger<TableSchemaProvider> _logger = logger;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
-    public Task<Dictionary<string, string?>> GetTablePropertiesAsync(
+    public async Task<TableSchemaDetails> GetTableSchemaDetailsAsync(
         KustoConfig config,
         string clusterUrl,
         string database,
         string tableName,
-        CancellationToken cancellationToken)
-    {
-        var settings = _settingsResolver.Resolve(config, clusterUrl, database);
-        return settings.Enabled
-            ? GetCachedTablePropertiesAsync(settings, clusterUrl, database, tableName, cancellationToken)
-            : GetLiveTablePropertiesAsync(clusterUrl, database, tableName, cancellationToken);
-    }
-
-    private async Task<Dictionary<string, string?>> GetCachedTablePropertiesAsync(
-        ResolvedSchemaCacheSettings settings,
-        string clusterUrl,
-        string database,
-        string tableName,
+        bool refreshOfflineData,
         CancellationToken cancellationToken)
     {
         var normalizedClusterUrl = ClusterUtilities.NormalizeClusterUrl(clusterUrl);
-        var cachePath = BuildCachePath(settings.CacheDirectory, normalizedClusterUrl, database);
-        var cacheEntry = await TryReadCacheEntryAsync(cachePath, cancellationToken);
+        var settings = _settingsResolver.Resolve(config, normalizedClusterUrl, database);
+        var existingEntry = await _offlineTableDataStore.TryReadEntryAsync(config, normalizedClusterUrl, database, cancellationToken);
 
-        if (cacheEntry is not null && !IsExpired(cacheEntry, settings.Ttl))
+        DatabaseSchemaCacheEntry? schemaEntry = existingEntry;
+        string schemaJson;
+
+        if (refreshOfflineData)
         {
-            _logger.LogDebug("Using cached schema for {ClusterUrl}/{Database}.", normalizedClusterUrl, database);
-            try
+            schemaEntry = await FetchDatabaseSchemaEntryAsync(normalizedClusterUrl, database, existingEntry, cancellationToken);
+            await _offlineTableDataStore.WriteEntryAsync(config, schemaEntry, cancellationToken);
+            schemaJson = schemaEntry.SchemaJson;
+        }
+        else if (settings.Enabled)
+        {
+            if (HasSchema(existingEntry))
             {
-                return BuildPropertiesFromDatabaseSchema(cacheEntry.SchemaJson, database, tableName);
+                if (!IsExpired(existingEntry!, settings.Ttl))
+                {
+                    schemaJson = existingEntry!.SchemaJson;
+                }
+                else
+                {
+                    schemaEntry = await RefreshCacheEntryAsync(existingEntry!, normalizedClusterUrl, database, cancellationToken);
+                    await _offlineTableDataStore.WriteEntryAsync(config, schemaEntry, cancellationToken);
+                    schemaJson = schemaEntry.SchemaJson;
+                }
             }
-            catch (UserFacingException ex)
+            else
             {
-                _logger.LogDebug(ex, "Refreshing cached schema for {ClusterUrl}/{Database} after a cache lookup miss.", normalizedClusterUrl, database);
-                var refreshedEntry = await FetchDatabaseSchemaAsync(normalizedClusterUrl, database, cancellationToken);
-                await WriteCacheEntryAsync(cachePath, refreshedEntry, cancellationToken);
-                return BuildPropertiesFromDatabaseSchema(refreshedEntry.SchemaJson, database, tableName);
+                schemaEntry = await FetchDatabaseSchemaEntryAsync(normalizedClusterUrl, database, existingEntry, cancellationToken);
+                await _offlineTableDataStore.WriteEntryAsync(config, schemaEntry, cancellationToken);
+                schemaJson = schemaEntry.SchemaJson;
             }
         }
-
-        if (cacheEntry is not null)
+        else
         {
-            cacheEntry = await RefreshCacheEntryAsync(cacheEntry, normalizedClusterUrl, database, cachePath, cancellationToken);
-            return BuildPropertiesFromDatabaseSchema(cacheEntry.SchemaJson, database, tableName);
+            schemaJson = await FetchDatabaseSchemaJsonAsync(normalizedClusterUrl, database, cancellationToken);
         }
 
-        var fetchedEntry = await FetchDatabaseSchemaAsync(normalizedClusterUrl, database, cancellationToken);
-        await WriteCacheEntryAsync(cachePath, fetchedEntry, cancellationToken);
-        return BuildPropertiesFromDatabaseSchema(fetchedEntry.SchemaJson, database, tableName);
+        try
+        {
+            return DatabaseSchemaJson.BuildTableSchemaDetails(schemaJson, database, tableName, GetTableNotes(schemaEntry ?? existingEntry, tableName));
+        }
+        catch (UserFacingException ex) when (!refreshOfflineData && settings.Enabled && HasSchema(existingEntry))
+        {
+            _logger.LogDebug(ex, "Refreshing cached schema for {ClusterUrl}/{Database} after a cache lookup miss.", normalizedClusterUrl, database);
+            schemaEntry = await FetchDatabaseSchemaEntryAsync(normalizedClusterUrl, database, existingEntry, cancellationToken);
+            await _offlineTableDataStore.WriteEntryAsync(config, schemaEntry, cancellationToken);
+            return DatabaseSchemaJson.BuildTableSchemaDetails(schemaEntry.SchemaJson, database, tableName, GetTableNotes(schemaEntry, tableName));
+        }
     }
 
     private async Task<DatabaseSchemaCacheEntry> RefreshCacheEntryAsync(
         DatabaseSchemaCacheEntry cacheEntry,
         string clusterUrl,
         string database,
-        string cachePath,
         CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(cacheEntry.SchemaVersion))
         {
-            var refreshedEntry = await TryFetchDatabaseSchemaIfUpdatedAsync(clusterUrl, database, cacheEntry.SchemaVersion, cancellationToken);
+            var refreshedEntry = await TryFetchDatabaseSchemaIfUpdatedAsync(clusterUrl, database, cacheEntry, cancellationToken);
             if (refreshedEntry is null)
             {
                 cacheEntry.CachedAtUtc = _timeProvider.GetUtcNow();
-                await WriteCacheEntryAsync(cachePath, cacheEntry, cancellationToken);
                 return cacheEntry;
             }
 
-            await WriteCacheEntryAsync(cachePath, refreshedEntry, cancellationToken);
             return refreshedEntry;
         }
 
-        var fullRefresh = await FetchDatabaseSchemaAsync(clusterUrl, database, cancellationToken);
-        await WriteCacheEntryAsync(cachePath, fullRefresh, cancellationToken);
-        return fullRefresh;
+        return await FetchDatabaseSchemaEntryAsync(clusterUrl, database, cacheEntry, cancellationToken);
     }
 
-    private async Task<DatabaseSchemaCacheEntry> FetchDatabaseSchemaAsync(
+    private async Task<DatabaseSchemaCacheEntry> FetchDatabaseSchemaEntryAsync(
+        string clusterUrl,
+        string database,
+        DatabaseSchemaCacheEntry? existingEntry,
+        CancellationToken cancellationToken)
+    {
+        var schemaJson = await FetchDatabaseSchemaJsonAsync(clusterUrl, database, cancellationToken);
+        return CreateCacheEntry(clusterUrl, database, schemaJson, existingEntry?.TableNotes);
+    }
+
+    private async Task<DatabaseSchemaCacheEntry?> TryFetchDatabaseSchemaIfUpdatedAsync(
+        string clusterUrl,
+        string database,
+        DatabaseSchemaCacheEntry existingEntry,
+        CancellationToken cancellationToken)
+    {
+        var result = await _kustoService.ExecuteManagementCommandAsync(
+            clusterUrl,
+            database,
+            BuildShowDatabaseSchemaCommand(database, existingEntry.SchemaVersion),
+            null,
+            cancellationToken);
+
+        if (result.Rows.Count == 0)
+        {
+            return null;
+        }
+
+        return CreateCacheEntry(
+            clusterUrl,
+            database,
+            DatabaseSchemaJson.ExtractSchemaJson(result),
+            existingEntry.TableNotes);
+    }
+
+    private async Task<string> FetchDatabaseSchemaJsonAsync(
         string clusterUrl,
         string database,
         CancellationToken cancellationToken)
@@ -107,135 +144,24 @@ public sealed class TableSchemaProvider(
             null,
             cancellationToken);
 
-        return CreateCacheEntry(clusterUrl, database, ExtractSchemaJson(result));
+        return DatabaseSchemaJson.ExtractSchemaJson(result);
     }
 
-    private async Task<DatabaseSchemaCacheEntry?> TryFetchDatabaseSchemaIfUpdatedAsync(
+    private DatabaseSchemaCacheEntry CreateCacheEntry(
         string clusterUrl,
         string database,
-        string schemaVersion,
-        CancellationToken cancellationToken)
-    {
-        var result = await _kustoService.ExecuteManagementCommandAsync(
-            clusterUrl,
-            database,
-            BuildShowDatabaseSchemaCommand(database, schemaVersion),
-            null,
-            cancellationToken);
-
-        if (result.Rows.Count == 0)
-        {
-            return null;
-        }
-
-        return CreateCacheEntry(clusterUrl, database, ExtractSchemaJson(result));
-    }
-
-    private async Task<Dictionary<string, string?>> GetLiveTablePropertiesAsync(
-        string clusterUrl,
-        string database,
-        string tableName,
-        CancellationToken cancellationToken)
-    {
-        var command = $".show table ['{KustoCommandText.EscapeSingleQuotedLiteral(tableName)}'] schema as json";
-        var result = await _kustoService.ExecuteManagementCommandAsync(
-            clusterUrl,
-            database,
-            command,
-            null,
-            cancellationToken);
-
-        if (result.Rows.Count == 0)
-        {
-            throw new UserFacingException($"Table '{tableName}' was not found.");
-        }
-
-        return ConvertRowToProperties(result, 0);
-    }
-
-    private async Task<DatabaseSchemaCacheEntry?> TryReadCacheEntryAsync(string cachePath, CancellationToken cancellationToken)
-    {
-        if (!File.Exists(cachePath))
-        {
-            return null;
-        }
-
-        try
-        {
-            await using var stream = File.OpenRead(cachePath);
-            var cacheEntry = await JsonSerializer.DeserializeAsync(
-                stream,
-                KustoJsonSerializerContext.Default.DatabaseSchemaCacheEntry,
-                cancellationToken);
-
-            if (cacheEntry is null || cacheEntry.CacheFormatVersion != CacheFormatVersion)
-            {
-                return null;
-            }
-
-            return cacheEntry;
-        }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
-        {
-            _logger.LogWarning(ex, "Ignoring unreadable schema cache entry at {CachePath}.", cachePath);
-            return null;
-        }
-    }
-
-    private async Task WriteCacheEntryAsync(string cachePath, DatabaseSchemaCacheEntry cacheEntry, CancellationToken cancellationToken)
-    {
-        var cacheDirectory = Path.GetDirectoryName(cachePath);
-        if (string.IsNullOrWhiteSpace(cacheDirectory))
-        {
-            return;
-        }
-
-        var temporaryPath = Path.Combine(cacheDirectory, $"{Path.GetFileName(cachePath)}.{Guid.NewGuid():N}.tmp");
-
-        try
-        {
-            Directory.CreateDirectory(cacheDirectory);
-            await using (var stream = File.Create(temporaryPath))
-            {
-                await JsonSerializer.SerializeAsync(
-                    stream,
-                    cacheEntry,
-                    KustoJsonSerializerContext.Default.DatabaseSchemaCacheEntry,
-                    cancellationToken);
-            }
-
-            File.Move(temporaryPath, cachePath, true);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _logger.LogWarning(ex, "Failed to write schema cache entry to {CachePath}.", cachePath);
-        }
-        finally
-        {
-            try
-            {
-                if (File.Exists(temporaryPath))
-                {
-                    File.Delete(temporaryPath);
-                }
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                _logger.LogDebug(ex, "Failed to clean up temporary schema cache file {TemporaryPath}.", temporaryPath);
-            }
-        }
-    }
-
-    private DatabaseSchemaCacheEntry CreateCacheEntry(string clusterUrl, string database, string schemaJson)
+        string schemaJson,
+        Dictionary<string, List<string>>? tableNotes)
     {
         return new DatabaseSchemaCacheEntry
         {
-            CacheFormatVersion = CacheFormatVersion,
+            CacheFormatVersion = 1,
             ClusterUrl = clusterUrl,
             DatabaseName = database,
             CachedAtUtc = _timeProvider.GetUtcNow(),
-            SchemaVersion = ExtractDatabaseSchemaVersion(schemaJson, database),
-            SchemaJson = schemaJson
+            SchemaVersion = DatabaseSchemaJson.ExtractDatabaseSchemaVersion(schemaJson, database),
+            SchemaJson = schemaJson,
+            TableNotes = CloneNotes(tableNotes)
         };
     }
 
@@ -251,11 +177,14 @@ public sealed class TableSchemaProvider(
         return $".show database ['{escapedDatabase}'] schema if_later_than \"{escapedSchemaVersion}\" as json";
     }
 
-    private static string BuildCachePath(string cacheDirectory, string clusterUrl, string database)
+    private IReadOnlyList<string>? GetTableNotes(DatabaseSchemaCacheEntry? cacheEntry, string tableName)
     {
-        var keyBytes = Encoding.UTF8.GetBytes($"database-schema:v{CacheFormatVersion}:{clusterUrl.ToLowerInvariant()}|{database.ToLowerInvariant()}");
-        var hash = Convert.ToHexString(SHA256.HashData(keyBytes)).ToLowerInvariant();
-        return Path.Combine(cacheDirectory, $"{hash}.json");
+        if (cacheEntry?.TableNotes is null || !cacheEntry.TableNotes.TryGetValue(tableName, out var notes) || notes.Count == 0)
+        {
+            return null;
+        }
+
+        return notes;
     }
 
     private bool IsExpired(DatabaseSchemaCacheEntry cacheEntry, TimeSpan ttl)
@@ -263,208 +192,37 @@ public sealed class TableSchemaProvider(
         return _timeProvider.GetUtcNow() - cacheEntry.CachedAtUtc >= ttl;
     }
 
-    private static string ExtractSchemaJson(TabularData result)
+    private bool HasSchema(DatabaseSchemaCacheEntry? cacheEntry)
     {
-        if (result.Rows.Count == 0)
-        {
-            throw new UserFacingException("Kusto did not return a database schema.");
-        }
-
-        var row = result.Rows[0];
-        if (TryGetPreferredValue(result, row, "DatabaseSchema", out var preferredValue) ||
-            TryGetPreferredValue(result, row, "Schema", out preferredValue))
-        {
-            return preferredValue!;
-        }
-
-        for (var i = 0; i < row.Count; i++)
-        {
-            if (!string.IsNullOrWhiteSpace(row[i]))
-            {
-                return row[i]!;
-            }
-        }
-
-        throw new UserFacingException("Kusto returned an empty database schema payload.");
-    }
-
-    private static Dictionary<string, string?> BuildPropertiesFromDatabaseSchema(string schemaJson, string database, string tableName)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(schemaJson);
-            var databaseElement = FindDatabaseElement(document.RootElement, database);
-            if (!TryGetNamedProperty(databaseElement, "Tables", out var tablesElement) ||
-                tablesElement.ValueKind != JsonValueKind.Object ||
-                !TryGetNamedProperty(tablesElement, tableName, out var tableElement) ||
-                tableElement.ValueKind != JsonValueKind.Object)
-            {
-                throw new UserFacingException($"Table '{tableName}' was not found.");
-            }
-
-            if (!TryGetNamedProperty(tableElement, "OrderedColumns", out var orderedColumnsElement) ||
-                orderedColumnsElement.ValueKind != JsonValueKind.Array)
-            {
-                throw new UserFacingException($"Kusto returned a schema for table '{tableName}' without OrderedColumns.");
-            }
-
-            var properties = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["TableName"] = GetStringProperty(tableElement, "Name") ?? tableName,
-                ["Schema"] = orderedColumnsElement.GetRawText(),
-                ["DatabaseName"] = GetStringProperty(databaseElement, "Name") ?? database
-            };
-
-            AddOptionalProperty(properties, tableElement, "Folder");
-            AddOptionalProperty(properties, tableElement, "DocString");
-
-            return properties;
-        }
-        catch (UserFacingException)
-        {
-            throw;
-        }
-        catch (JsonException ex)
-        {
-            throw new UserFacingException("Kusto returned an unexpected database schema format.", ex);
-        }
-    }
-
-    private static string? ExtractDatabaseSchemaVersion(string schemaJson, string database)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(schemaJson);
-            var databaseElement = FindDatabaseElement(document.RootElement, database);
-
-            var explicitVersion = GetStringProperty(databaseElement, "Version");
-            if (!string.IsNullOrWhiteSpace(explicitVersion))
-            {
-                return explicitVersion;
-            }
-
-            if (TryGetNamedProperty(databaseElement, "MajorVersion", out var majorVersionElement) &&
-                TryGetNamedProperty(databaseElement, "MinorVersion", out var minorVersionElement) &&
-                TryGetInt32(majorVersionElement, out var majorVersion) &&
-                TryGetInt32(minorVersionElement, out var minorVersion))
-            {
-                return $"v{majorVersion}.{minorVersion}";
-            }
-
-            return null;
-        }
-        catch (JsonException ex)
-        {
-            throw new UserFacingException("Kusto returned an unexpected database schema format.", ex);
-        }
-    }
-
-    private static JsonElement FindDatabaseElement(JsonElement rootElement, string database)
-    {
-        if (TryGetNamedProperty(rootElement, "Databases", out var databasesElement) &&
-            databasesElement.ValueKind == JsonValueKind.Object)
-        {
-            if (TryGetNamedProperty(databasesElement, database, out var databaseElement))
-            {
-                return databaseElement;
-            }
-
-            if (databasesElement.EnumerateObject().FirstOrDefault() is { Name: not null } firstDatabase)
-            {
-                return firstDatabase.Value;
-            }
-        }
-
-        if (TryGetNamedProperty(rootElement, "Tables", out _))
-        {
-            return rootElement;
-        }
-
-        throw new UserFacingException($"Kusto did not return a schema for database '{database}'.");
-    }
-
-    private static bool TryGetNamedProperty(JsonElement element, string propertyName, out JsonElement value)
-    {
-        if (element.ValueKind != JsonValueKind.Object)
-        {
-            value = default;
-            return false;
-        }
-
-        if (element.TryGetProperty(propertyName, out value))
-        {
-            return true;
-        }
-
-        foreach (var property in element.EnumerateObject())
-        {
-            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
-            {
-                value = property.Value;
-                return true;
-            }
-        }
-
-        value = default;
-        return false;
-    }
-
-    private static string? GetStringProperty(JsonElement element, string propertyName)
-    {
-        return TryGetNamedProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
-    }
-
-    private static bool TryGetInt32(JsonElement element, out int value)
-    {
-        value = 0;
-        return element.ValueKind switch
-        {
-            JsonValueKind.Number => element.TryGetInt32(out value),
-            JsonValueKind.String => int.TryParse(element.GetString(), out value),
-            _ => false
-        };
-    }
-
-    private static void AddOptionalProperty(Dictionary<string, string?> properties, JsonElement element, string propertyName)
-    {
-        var value = GetStringProperty(element, propertyName);
-        if (!string.IsNullOrWhiteSpace(value))
-        {
-            properties[propertyName] = value;
-        }
-    }
-
-    private static Dictionary<string, string?> ConvertRowToProperties(TabularData table, int rowIndex)
-    {
-        var properties = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        if (rowIndex >= table.Rows.Count)
-        {
-            return properties;
-        }
-
-        var row = table.Rows[rowIndex];
-        for (var i = 0; i < table.Columns.Count; i++)
-        {
-            var value = i < row.Count ? row[i] : null;
-            properties[table.Columns[i]] = value;
-        }
-
-        return properties;
-    }
-
-    private static bool TryGetPreferredValue(TabularData table, IReadOnlyList<string?> row, string columnName, out string? value)
-    {
-        value = null;
-        if (!table.TryGetColumnIndex(columnName, out var columnIndex) ||
-            columnIndex >= row.Count ||
-            string.IsNullOrWhiteSpace(row[columnIndex]))
+        if (cacheEntry is null || string.IsNullOrWhiteSpace(cacheEntry.SchemaJson))
         {
             return false;
         }
 
-        value = row[columnIndex];
-        return true;
+        try
+        {
+            return DatabaseSchemaJson.GetTableNames(cacheEntry.SchemaJson, cacheEntry.DatabaseName).Count > 0;
+        }
+        catch (UserFacingException ex)
+        {
+            _logger.LogDebug(ex, "Ignoring unreadable cached schema for {ClusterUrl}/{Database}.", cacheEntry.ClusterUrl, cacheEntry.DatabaseName);
+            return false;
+        }
+    }
+
+    private static Dictionary<string, List<string>> CloneNotes(Dictionary<string, List<string>>? tableNotes)
+    {
+        var clone = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        if (tableNotes is null)
+        {
+            return clone;
+        }
+
+        foreach (var pair in tableNotes)
+        {
+            clone[pair.Key] = [.. pair.Value];
+        }
+
+        return clone;
     }
 }

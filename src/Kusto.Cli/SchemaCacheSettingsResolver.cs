@@ -37,6 +37,13 @@ public sealed class SchemaCacheSettingsResolver(
         return new ResolvedSchemaCacheSettings(true, cacheDirectory, TimeSpan.FromSeconds(ttlSeconds));
     }
 
+    public string ResolveCacheDirectory(KustoConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        var cacheConfig = config.SchemaCache ?? new SchemaCacheConfig();
+        return ResolveCacheDirectory(cacheConfig);
+    }
+
     private bool ResolveEnabled(bool configuredEnabled)
     {
         var value = _getEnvironmentVariable(CacheEnabledEnvironmentVariable);

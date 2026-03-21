@@ -82,10 +82,18 @@ public static class CliRunner
         var tokenProvider = new AzureTokenProvider();
         var httpClient = new HttpClient();
         var kustoService = new KustoHttpService(httpClient, tokenProvider, loggerFactory.CreateLogger<KustoHttpService>());
+        var settingsResolver = new SchemaCacheSettingsResolver();
+        var offlineTableDataStore = new OfflineTableDataStore(settingsResolver, loggerFactory.CreateLogger<OfflineTableDataStore>());
         var tableSchemaProvider = new TableSchemaProvider(
             kustoService,
-            new SchemaCacheSettingsResolver(),
+            offlineTableDataStore,
+            settingsResolver,
             loggerFactory.CreateLogger<TableSchemaProvider>());
+        var tableOfflineDataManager = new TableOfflineDataManager(
+            kustoService,
+            offlineTableDataStore,
+            loggerFactory.CreateLogger<TableOfflineDataManager>());
+        var confirmationPrompt = new ConsoleConfirmationPrompt(Console.In, stderrWriter ?? Console.Error);
         var formatter = new OutputFormatter();
 
         return new CliRuntime(
@@ -96,6 +104,8 @@ public static class CliRunner
             connectionResolver,
             kustoService,
             tableSchemaProvider,
+            tableOfflineDataManager,
+            confirmationPrompt,
             formatter);
     }
 }

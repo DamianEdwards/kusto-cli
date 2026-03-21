@@ -87,6 +87,36 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_TableShow_AcceptsRefreshOfflineData()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["table", "show", "StormEvents", "--refresh-offline-data"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_TableNotesCommands_AreAccepted()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+
+        Assert.Empty(rootCommand.Parse(["table", "notes", "StormEvents", "--add", "Useful note", "--cluster", "help", "--db", "Samples"], new ParserConfiguration()).Errors);
+        Assert.Empty(rootCommand.Parse(["table", "notes", "StormEvents", "--id", "1", "--cluster", "help", "--db", "Samples"], new ParserConfiguration()).Errors);
+        Assert.Empty(rootCommand.Parse(["table", "notes", "StormEvents", "--delete", "1", "--cluster", "help", "--db", "Samples"], new ParserConfiguration()).Errors);
+        Assert.Empty(rootCommand.Parse(["table", "notes", "--clear", "--force"], new ParserConfiguration()).Errors);
+    }
+
+    [Fact]
+    public void Parse_TableOfflineDataCommands_AreAccepted()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+
+        Assert.Empty(rootCommand.Parse(["table", "--export-offline-data", "offline-data.json"], new ParserConfiguration()).Errors);
+        Assert.Empty(rootCommand.Parse(["table", "--import-offline-data", "offline-data.json"], new ParserConfiguration()).Errors);
+        Assert.Empty(rootCommand.Parse(["table", "--purge-offline-data", "--force"], new ParserConfiguration()).Errors);
+        Assert.Empty(rootCommand.Parse(["table", "StormEvents", "--clear-offline-data", "--cluster", "help", "--db", "Samples", "--force"], new ParserConfiguration()).Errors);
+    }
+
+    [Fact]
     public void Parse_QueryAliases_AcceptRunAndFileAlias()
     {
         var rootCommand = CommandFactory.CreateRootCommand();
