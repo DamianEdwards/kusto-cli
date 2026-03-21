@@ -119,7 +119,7 @@ jobs:
           retention-days: 30
 
       - name: Publish test results
-        uses: dorny/test-reporter@3d76b34a4535afbd0600d347b09a6ee5deb3ed7f
+        uses: dorny/test-reporter@2dcf091ad558da2cabf16f6b423e02cd078c937a
         if: always()
         with:
           name: Test Results
