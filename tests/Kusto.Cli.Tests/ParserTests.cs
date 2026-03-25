@@ -125,6 +125,22 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_Query_AcceptsFileRangeSuffix()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["query", "--file", @".\queries\top-states.kql:12-15", "--cluster", "help", "--db", "Samples"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void Parse_Query_AcceptsWindowsAbsoluteFilePath()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["query", "--file", @"C:\queries\top-states.kql", "--cluster", "help", "--db", "Samples"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
     public void Parse_Query_AcceptsShowStats()
     {
         var rootCommand = CommandFactory.CreateRootCommand();

@@ -844,7 +844,7 @@ public static class CommandFactory
                 var resolvedDatabase = runtime.ConnectionResolver.ResolveDatabase(config, resolvedCluster.Url, databaseName);
                 var query = await QueryTextResolver.ResolveAsync(
                     queryText,
-                    queryFile?.FullName,
+                    queryFile,
                     Console.IsInputRedirected,
                     Console.In,
                     ct);
@@ -953,11 +953,11 @@ public static class CommandFactory
         return option;
     }
 
-    private static Option<FileInfo?> CreateQueryFileOption()
+    private static Option<string?> CreateQueryFileOption()
     {
-        var option = new Option<FileInfo?>("--file")
+        var option = new Option<string?>("--file")
         {
-            Description = "Path to a file containing KQL query text. Alias: -f."
+            Description = "Path to a file containing KQL query text. Append :<start>-<end> to read specific lines. Alias: -f."
         };
         option.Aliases.Add("-f");
         return option;
