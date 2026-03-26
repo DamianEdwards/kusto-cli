@@ -454,10 +454,36 @@ public sealed class KustoHttpServiceTests
                 null,
                 CancellationToken.None));
 
-        Assert.Equal("Kusto rejected the query or command. Check your syntax and verify the selected cluster and database.", exception.Message);
+        Assert.Equal(
+            "Kusto rejected the query or command for cluster 'https://help.kusto.windows.net' and database 'Samples'. Check your syntax and verify that the selected cluster and database match the query or command.",
+            exception.Message);
         Assert.DoesNotContain("ClientRequestId", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("ActivityId", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Timestamp", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_OnGenericBadRequest_IncludesClusterAndDatabaseContext()
+    {
+        const string responseBody = "General_BadRequest: Request is invalid and cannot be executed.";
+        var handler = new RecordingHandler(() => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(responseBody)
+        });
+        using var httpClient = new HttpClient(handler);
+        var service = new KustoHttpService(httpClient, new StaticTokenProvider("fake-token"), NullLogger<KustoHttpService>.Instance);
+
+        var exception = await Assert.ThrowsAsync<UserFacingException>(() =>
+            service.ExecuteQueryAsync(
+                "https://help.kusto.windows.net",
+                "Samples",
+                "StormEvents | take 1",
+                includeStatistics: false,
+                CancellationToken.None));
+
+        Assert.Contains("https://help.kusto.windows.net", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("database 'Samples'", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("General_BadRequest", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
