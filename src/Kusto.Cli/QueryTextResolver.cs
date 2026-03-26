@@ -4,13 +4,9 @@ using System.Text.RegularExpressions;
 
 namespace Kusto.Cli;
 
-public static class QueryTextResolver
+public static partial class QueryTextResolver
 {
     private const int FileScanBufferSize = 4096;
-
-    private static readonly Regex QueryFileLineRangePattern = new(
-        "^(?<start>-?\\d+)-(?<end>-?\\d+)$",
-        RegexOptions.CultureInvariant);
 
     private static readonly SearchValues<char> NewLineSearchValues = SearchValues.Create("\r\n");
     private static readonly UTF8Encoding DefaultFileEncoding = new(encoderShouldEmitUTF8Identifier: false);
@@ -130,7 +126,7 @@ public static class QueryTextResolver
         out QueryLineRange lineRange,
         out UserFacingException? parseError)
     {
-        var match = QueryFileLineRangePattern.Match(rangeText);
+        var match = QueryFileLineRangePattern().Match(rangeText);
         if (!match.Success)
         {
             lineRange = default;
@@ -444,8 +440,8 @@ public static class QueryTextResolver
                     $"Query file range '{_lineRange.StartLine}-{_lineRange.EndLine}' is out of range for '{filePath}', which has {ValidLineCount} line{(ValidLineCount == 1 ? string.Empty : "s")}.");
             }
 
-            return new LocatedLineRange(RangeStartOffset.Value, RangeEndOffset ?? fileLength);
-        }
+        return new LocatedLineRange(RangeStartOffset.Value, RangeEndOffset ?? fileLength);
+    }
 
         private void EnsureLineStarted()
         {
@@ -481,4 +477,7 @@ public static class QueryTextResolver
     private readonly record struct DetectedFileEncoding(Encoding Encoding, int PreambleLength);
 
     private readonly record struct LocatedLineRange(long StartOffset, long EndOffset);
+
+    [GeneratedRegex("^(?<start>-?\\d+)-(?<end>-?\\d+)$", RegexOptions.CultureInvariant)]
+    private static partial Regex QueryFileLineRangePattern();
 }
