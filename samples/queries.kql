@@ -1,0 +1,39 @@
+// Sample queries for the public Kusto help cluster.
+// Run the first query with:
+//   .\kusto.cmd query --file .\samples\queries.kql:6-9 --cluster help --database Samples
+// Or run a specific query by selecting its line range with --file <path>:<start>-<end>.
+
+// Query 1: Top states by event count
+StormEvents
+| summarize EventCount = count() by State
+| top 10 by EventCount desc
+
+// Query 2: Most common event types
+StormEvents
+| summarize EventCount = count() by EventType
+| top 10 by EventCount desc
+
+// Query 3: Weekly event volume time chart
+StormEvents
+| summarize EventCount = count() by bin(StartTime, 7d)
+| order by StartTime asc
+| render timechart
+
+// Query 4: States with the most direct fatalities
+StormEvents
+| where DeathsDirect > 0
+| summarize DirectFatalities = sum(DeathsDirect) by State
+| top 10 by DirectFatalities desc
+| render barchart
+
+// Query 5: Event types with the highest combined property damage
+StormEvents
+| summarize PropertyDamage = sum(DamageProperty) by EventType
+| top 10 by PropertyDamage desc
+| render columnchart
+
+// Query 6: Top states by combined crop damage
+StormEvents
+| summarize CropDamage = sum(DamageCrops) by State
+| top 10 by CropDamage desc
+| render piechart
