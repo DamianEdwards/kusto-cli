@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Kusto.Cli.Tests;
 
 public sealed class QueryTextResolverTests
@@ -132,6 +134,36 @@ public sealed class QueryTextResolverTests
                 QueryTextResolver.ResolveAsync(null, $"{path}:2-4", false, TextReader.Null, CancellationToken.None));
 
             Assert.Equal($"Query file range '2-4' is out of range for '{path}', which has 2 lines.", exception.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ReturnsSpecifiedLineRangeFromUtf8BomFileWithMultibyteCharacters()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            var fileContents = string.Join(
+                Environment.NewLine,
+                [
+                    "let city = \"Qu\u00E9bec\";",
+                    "let emoji = \"\uD83D\uDE00\";",
+                    "StormEvents",
+                    "| take 3"
+                ]);
+
+            await File.WriteAllTextAsync(
+                path,
+                fileContents,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
+                CancellationToken.None);
+
+            var query = await QueryTextResolver.ResolveAsync(null, $"{path}:3-4", false, TextReader.Null, CancellationToken.None);
+            Assert.Equal("StormEvents" + Environment.NewLine + "| take 3", query);
         }
         finally
         {
