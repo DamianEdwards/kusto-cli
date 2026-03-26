@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -33,7 +34,7 @@ public static partial class QueryTextResolver
                     return await ReadQueryFromFileAsync(new QueryFileReference(normalizedFileReference, null), cancellationToken);
                 }
 
-                throw parseError!;
+                throw parseError;
             }
 
             if (!File.Exists(fileReference.Path))
@@ -79,7 +80,7 @@ public static partial class QueryTextResolver
             return fileReference;
         }
 
-        throw parseError!;
+        throw parseError;
     }
 
     private static bool IsWindowsDriveSeparator(string queryFileReference, int separatorIndex) =>
@@ -92,6 +93,7 @@ public static partial class QueryTextResolver
     private static bool TryParseFileReference(
         string queryFileReference,
         out QueryFileReference fileReference,
+        [NotNullWhen(false)]
         out UserFacingException? parseError)
     {
         var rangeSeparatorIndex = queryFileReference.LastIndexOf(':');
@@ -124,6 +126,7 @@ public static partial class QueryTextResolver
     private static bool TryParseLineRange(
         string rangeText,
         out QueryLineRange lineRange,
+        [NotNullWhen(false)]
         out UserFacingException? parseError)
     {
         var match = QueryFileLineRangePattern().Match(rangeText);
