@@ -33,6 +33,7 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
             clusterUrl,
             "/v2/rest/query",
             new KustoRequestPayload { Db = database, Csl = query },
+            database,
             cancellationToken);
         var primaryResult = SelectPrimaryResult(tables);
 
@@ -65,7 +66,7 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
             };
         }
 
-        var tables = await ExecuteAsync(clusterUrl, "/v1/rest/mgmt", payload, cancellationToken);
+        var tables = await ExecuteAsync(clusterUrl, "/v1/rest/mgmt", payload, database, cancellationToken);
         var primaryResult = SelectPrimaryResult(tables);
         return new TabularData(primaryResult.Columns, primaryResult.Rows);
     }
@@ -74,6 +75,7 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
         string clusterUrl,
         string endpointPath,
         KustoRequestPayload payload,
+        string? database,
         CancellationToken cancellationToken)
     {
         var requestUri = new Uri($"{ClusterUtilities.NormalizeClusterUrl(clusterUrl)}{endpointPath}");
@@ -91,7 +93,7 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             _logger.LogError("Kusto request to {Uri} failed with status code {StatusCode}. Body: {Body}", requestUri, (int)response.StatusCode, body);
-            throw new UserFacingException(CreateUserFacingError(response.StatusCode, body));
+            throw new UserFacingException(CreateUserFacingError(response.StatusCode, body, clusterUrl, database));
         }
 
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -257,14 +259,19 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
         };
     }
 
-    private static string CreateUserFacingError(HttpStatusCode statusCode, string responseBody)
+    private static string CreateUserFacingError(
+        HttpStatusCode statusCode,
+        string responseBody,
+        string clusterUrl,
+        string? database)
     {
         var detail = ExtractActionableDetail(responseBody);
+        var targetContext = CreateTargetContext(clusterUrl, database);
 
         return statusCode switch
         {
             HttpStatusCode.BadRequest => string.IsNullOrWhiteSpace(detail)
-                ? "Kusto rejected the query or command. Check your syntax and verify the selected cluster and database."
+                ? $"Kusto rejected the query or command{targetContext}. Check your syntax and verify that the selected cluster and database match the query or command."
                 : $"Kusto rejected the query or command: {detail}",
             HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
                 "Kusto rejected this request because your identity does not have access. Run 'az login' and verify access to the cluster and database. For sovereign clouds, make sure Azure CLI is set to the matching cloud with 'az cloud set'.",
@@ -312,5 +319,13 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
         }
 
         return null;
+    }
+
+    private static string CreateTargetContext(string clusterUrl, string? database)
+    {
+        var normalizedClusterUrl = ClusterUtilities.NormalizeClusterUrl(clusterUrl);
+        return string.IsNullOrWhiteSpace(database)
+            ? $" for cluster '{normalizedClusterUrl}'"
+            : $" for cluster '{normalizedClusterUrl}' and database '{database}'";
     }
 }

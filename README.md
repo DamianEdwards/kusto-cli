@@ -257,7 +257,7 @@ These options are available on all commands:
 | `--clear-offline-data` | `table [<table>]` | Clear offline data for one table or for all tables. Alias: `-c`. |
 | `--force` | destructive `table` / `table notes` actions | Skip the confirmation prompt when clearing or purging offline data. Alias: `-f`. |
 | `--use` | `cluster add` | Also set the added cluster as the active/default cluster. |
-| `--file <path>` | `query` | Read query text from file. Alias: `-f`. Cannot be combined with inline query argument. |
+| `--file <path>` | `query` | Read query text from file. Append `:<start>-<end>` to read an inclusive 1-based line range. Alias: `-f`. Cannot be combined with inline query argument. |
 | `--chart` | `query` | Render compatible query results as a chart for `human` or `markdown` output. Not supported with `json` or `csv`. |
 | `--show-stats` | `query` | Include query execution statistics when Kusto returns them. Not supported with `csv`. |
 
@@ -367,6 +367,9 @@ kusto query "StormEvents | summarize Count=count() by State | top 10 by Count de
 
 # Query from file
 kusto query --file .\queries\top-states.kql --cluster help --database Samples
+
+# Query a specific line range from a file containing multiple statements
+kusto query --file .\queries\top-states.kql:12-15 --cluster help --database Samples
 
 # Query from stdin
 @"
