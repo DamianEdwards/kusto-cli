@@ -4,19 +4,46 @@ namespace Kusto.Cli;
 
 public static class CliRunner
 {
-    public static async Task<int> RunAsync(
+    private static readonly OutputFormat[] DefaultSupportedFormats =
+    [
+        OutputFormat.Human,
+        OutputFormat.Json,
+        OutputFormat.Markdown
+    ];
+
+    private static readonly OutputFormat[] RecognizedFormats =
+    [
+        OutputFormat.Human,
+        OutputFormat.Json,
+        OutputFormat.Markdown,
+        OutputFormat.Csv
+    ];
+
+    public static Task<int> RunAsync(
         string formatToken,
         string? logLevelToken,
         Func<CliRuntime, CancellationToken, Task<CliOutput>> commandAction,
         CancellationToken cancellationToken)
+        => RunAsync(formatToken, logLevelToken, commandAction, cancellationToken, DefaultSupportedFormats);
+
+    public static async Task<int> RunAsync(
+        string formatToken,
+        string? logLevelToken,
+        Func<CliRuntime, CancellationToken, Task<CliOutput>> commandAction,
+        CancellationToken cancellationToken,
+        params OutputFormat[] supportedFormats)
     {
         OutputFormat format;
         LogLevel? logLevel;
+        supportedFormats = supportedFormats is { Length: > 0 }
+            ? supportedFormats
+            : DefaultSupportedFormats;
 
         try
         {
             format = ParseOutputFormatToken(formatToken);
             logLevel = ParseLogLevelToken(logLevelToken);
+            EnsureSupportedOutputFormat(formatToken, format, supportedFormats);
         }
         catch (Exception ex)
         {
@@ -53,7 +80,9 @@ public static class CliRunner
             "json" => OutputFormat.Json,
             "markdown" => OutputFormat.Markdown,
             "md" => OutputFormat.Markdown,
-            _ => throw new UserFacingException($"'{formatToken}' is not a valid output format. Use one of: human, json, markdown, md.")
+            "csv" => OutputFormat.Csv,
+            _ => throw new UserFacingException(
+                $"'{formatToken}' is not a valid output format. Use one of: {DescribeOutputFormats(RecognizedFormats)}.")
         };
     }
 
@@ -107,5 +136,45 @@ public static class CliRunner
             tableOfflineDataManager,
             confirmationPrompt,
             formatter);
+    }
+
+    private static void EnsureSupportedOutputFormat(string formatToken, OutputFormat format, IReadOnlyCollection<OutputFormat> supportedFormats)
+    {
+        if (supportedFormats.Contains(format))
+        {
+            return;
+        }
+
+        throw new UserFacingException(
+            $"'{formatToken}' is not supported for this command. Use one of: {DescribeOutputFormats(supportedFormats)}.");
+    }
+
+    private static string DescribeOutputFormats(IEnumerable<OutputFormat> formats)
+    {
+        var uniqueFormats = new HashSet<OutputFormat>(formats);
+        var tokens = new List<string>();
+
+        if (uniqueFormats.Contains(OutputFormat.Human))
+        {
+            tokens.Add("human");
+        }
+
+        if (uniqueFormats.Contains(OutputFormat.Json))
+        {
+            tokens.Add("json");
+        }
+
+        if (uniqueFormats.Contains(OutputFormat.Markdown))
+        {
+            tokens.Add("markdown");
+            tokens.Add("md");
+        }
+
+        if (uniqueFormats.Contains(OutputFormat.Csv))
+        {
+            tokens.Add("csv");
+        }
+
+        return string.Join(", ", tokens);
     }
 }

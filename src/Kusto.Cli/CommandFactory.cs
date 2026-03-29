@@ -8,11 +8,11 @@ public static class CommandFactory
     {
         var formatOption = new Option<string>("--format")
         {
-            Description = "Output format for people or tools: human, json, markdown, md.",
+            Description = "Output format for people or tools: human, json, markdown, md, csv (query only).",
             Recursive = true,
             DefaultValueFactory = _ => "human"
         };
-        formatOption.AcceptOnlyFromAmong("human", "json", "markdown", "md");
+        formatOption.AcceptOnlyFromAmong("human", "json", "markdown", "md", "csv");
 
         var logLevelOption = new Option<string?>("--log-level")
         {
@@ -55,6 +55,7 @@ public static class CommandFactory
                             ["Run KQL", "kusto query \"StormEvents | take 5\" --cluster help --database Samples"],
                             ["Run KQL", "kusto query --chart \"StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart\" --cluster help --database Samples"],
                             ["Run KQL", "kusto query --format markdown --chart \"StormEvents | summarize Count=count() by State | top 5 by Count desc | render piechart\" --cluster help --database Samples"],
+                            ["Run KQL", "kusto query \"StormEvents | summarize EventCount=count() by State | top 10 by EventCount desc\" --format csv --cluster help --database Samples > top-states.csv"],
                             ["Run KQL", "kusto query --file .\\queries\\top-states.kql --cluster help --database Samples"],
                             ["Optional aliases", "aliases | clusters | db | databases | tables | ls | get | schema | rm | delete | use | run | exec | --db | --limit | -f"]
                         ])
@@ -834,9 +835,15 @@ public static class CommandFactory
                 var isJsonOutput = string.Equals(format, "json", StringComparison.OrdinalIgnoreCase);
                 var isMarkdownOutput = string.Equals(format, "markdown", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(format, "md", StringComparison.OrdinalIgnoreCase);
-                if (showChart && isJsonOutput)
+                var isCsvOutput = string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase);
+                if (showChart && (isJsonOutput || isCsvOutput))
                 {
-                    throw new UserFacingException("--chart can't be used with --format json.");
+                    throw new UserFacingException($"--chart can't be used with --format {format.ToLowerInvariant()}.");
+                }
+
+                if (showStats && isCsvOutput)
+                {
+                    throw new UserFacingException("--show-stats can't be used with --format csv.");
                 }
 
                 var config = await runtime.ConfigStore.LoadAsync(ct);
@@ -892,7 +899,7 @@ public static class CommandFactory
                             }
                         }
                     }
-                    else if (!isMarkdownOutput && compatibility.HumanChart is not null)
+                    else if (!isMarkdownOutput && !isCsvOutput && compatibility.HumanChart is not null)
                     {
                         chartHint = "This query can be rendered as a terminal chart. Re-run with --chart to see it.";
                     }
@@ -911,7 +918,7 @@ public static class CommandFactory
                     MarkdownChart = markdownChart,
                     IsQueryResultTable = true
                 };
-            }, cancellationToken);
+            }, cancellationToken, OutputFormat.Human, OutputFormat.Json, OutputFormat.Markdown, OutputFormat.Csv);
         });
 
         return queryCommand;

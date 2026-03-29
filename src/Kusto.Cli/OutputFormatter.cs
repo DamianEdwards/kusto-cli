@@ -12,6 +12,7 @@ public sealed class OutputFormatter : IOutputFormatter
         {
             OutputFormat.Json => JsonSerializer.Serialize(output, KustoJsonSerializerContext.Default.CliOutput),
             OutputFormat.Markdown => FormatMarkdown(output),
+            OutputFormat.Csv => FormatCsv(output),
             _ => FormatHuman(output)
         };
     }
@@ -118,6 +119,24 @@ public sealed class OutputFormatter : IOutputFormatter
         }
 
         return buffer.ToString().TrimEnd();
+    }
+
+    private static string FormatCsv(CliOutput output)
+    {
+        if (output.Table is not { Columns.Count: > 0 } table)
+        {
+            return string.Empty;
+        }
+
+        var buffer = new StringBuilder();
+        AppendCsvRow(buffer, table.Columns);
+
+        foreach (var row in table.Rows)
+        {
+            AppendCsvRow(buffer, row);
+        }
+
+        return buffer.ToString().TrimEnd('\r', '\n');
     }
 
     private static Dictionary<string, string?> BuildDisplayProperties(CliOutput output)
@@ -228,6 +247,37 @@ public sealed class OutputFormatter : IOutputFormatter
         {
             properties[key] = value;
         }
+    }
+
+    private static void AppendCsvRow(StringBuilder buffer, IEnumerable<string?> values)
+    {
+        var firstValue = true;
+        foreach (var value in values)
+        {
+            if (!firstValue)
+            {
+                buffer.Append(',');
+            }
+
+            buffer.Append(EscapeCsvValue(value));
+            firstValue = false;
+        }
+
+        buffer.AppendLine();
+    }
+
+    private static string EscapeCsvValue(string? value)
+    {
+        var text = value ?? string.Empty;
+        if (!text.Contains(',', StringComparison.Ordinal) &&
+            !text.Contains('"', StringComparison.Ordinal) &&
+            !text.Contains('\r') &&
+            !text.Contains('\n'))
+        {
+            return text;
+        }
+
+        return $"\"{text.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
     }
 
     private static string BuildHumanTextOutput(CliOutput output, int? availableWidth)
