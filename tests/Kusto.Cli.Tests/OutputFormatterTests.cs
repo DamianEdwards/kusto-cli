@@ -100,6 +100,87 @@ public sealed class OutputFormatterTests
     }
 
     [Fact]
+    public void FormatCsv_TableOutput_UsesHeadersAndRows()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(
+                ["Name", "Count"],
+                [
+                    ["alpha", "42"],
+                    ["beta", "7"]
+                ])
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Csv);
+
+        var expected = string.Join(Environment.NewLine, ["Name,Count", "alpha,42", "beta,7"]);
+        Assert.Equal(expected, rendered);
+    }
+
+    [Fact]
+    public void FormatCsv_TableOutput_EscapesSpecialCharacters()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(
+                ["Name", "Notes", "Quote"],
+                [
+                    ["alpha,beta", $"line1{Environment.NewLine}line2", "he said \"hi\""]
+                ])
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Csv);
+
+        var expected = string.Join(
+            Environment.NewLine,
+            [
+                "Name,Notes,Quote",
+                $"\"alpha,beta\",\"line1{Environment.NewLine}line2\",\"he said \"\"hi\"\"\""
+            ]);
+        Assert.Equal(expected, rendered);
+    }
+
+    [Fact]
+    public void FormatCsv_QueryOutput_IgnoresNonTabularMetadata()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Message = "not included",
+            Properties = new Dictionary<string, string?> { ["Name"] = "Samples" },
+            Table = new TabularData(["Name"], [["alpha"]]),
+            WebExplorerUrl = "https://dataexplorer.azure.com/",
+            Statistics = new QueryStatistics { ExecutionTimeSec = 1.23 },
+            Visualization = new QueryVisualization { Visualization = "piechart" },
+            ChartHint = "hint",
+            ChartMessage = "message",
+            HumanChart = "chart",
+            MarkdownChart = "```mermaid```"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Csv);
+
+        Assert.Equal(string.Join(Environment.NewLine, ["Name", "alpha"]), rendered);
+    }
+
+    [Fact]
+    public void FormatCsv_WithoutTable_ReturnsEmptyString()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Message = "hello"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Csv);
+
+        Assert.Equal(string.Empty, rendered);
+    }
+
+    [Fact]
     public void FormatHuman_QueryOutput_HidesWebExplorerUrlByDefault()
     {
         var formatter = new OutputFormatter();

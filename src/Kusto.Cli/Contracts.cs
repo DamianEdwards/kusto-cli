@@ -138,5 +138,6 @@ public enum OutputFormat
 {
     Human,
     Json,
-    Markdown
+    Markdown,
+    Csv
 }

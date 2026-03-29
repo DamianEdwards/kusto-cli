@@ -13,10 +13,18 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_AllowsCsvFormat()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["query", "print 1", "--format", "csv"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
     public void Parse_RejectsUnknownFormat()
     {
         var rootCommand = CommandFactory.CreateRootCommand();
-        var result = rootCommand.Parse(["cluster", "list", "--format", "csv"], new ParserConfiguration());
+        var result = rootCommand.Parse(["cluster", "list", "--format", "xml"], new ParserConfiguration());
         Assert.NotEmpty(result.Errors);
     }
 
