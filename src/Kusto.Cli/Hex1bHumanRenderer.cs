@@ -94,6 +94,8 @@ internal static class Hex1bHumanRenderer
             return FormatDataTable(new TabularData(["Value"], data.Rows), isQueryResultTable: false, maxWidth);
         }
 
+        data = FormatQueryValuesForDisplay(data);
+
         var columnCount = data.Columns.Count;
         var headerLines = data.Columns
             .Select(header => SplitCellLines(header).AsReadOnly())
@@ -413,6 +415,192 @@ internal static class Hex1bHumanRenderer
         }
 
         return hasValue;
+    }
+
+    private static readonly string[] KustoDateTimeFormats =
+    [
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'"
+    ];
+
+    internal static TabularData FormatQueryValuesForDisplay(TabularData data)
+    {
+        if (data.Rows.Count == 0 || data.Columns.Count == 0)
+        {
+            return data;
+        }
+
+        var columnCount = data.Columns.Count;
+        var formats = new ColumnDisplayFormat[columnCount];
+        var anyFormatted = false;
+
+        for (var i = 0; i < columnCount; i++)
+        {
+            formats[i] = DetectColumnDisplayFormat(data, i);
+            if (formats[i] != ColumnDisplayFormat.None)
+            {
+                anyFormatted = true;
+            }
+        }
+
+        if (!anyFormatted)
+        {
+            return data;
+        }
+
+        var formattedRows = new IReadOnlyList<string?>[data.Rows.Count];
+        for (var rowIndex = 0; rowIndex < data.Rows.Count; rowIndex++)
+        {
+            var row = data.Rows[rowIndex];
+            var formatted = new string?[columnCount];
+            for (var i = 0; i < columnCount; i++)
+            {
+                var value = i < row.Count ? row[i] : null;
+                formatted[i] = formats[i] switch
+                {
+                    ColumnDisplayFormat.Integer => FormatIntegerValue(value),
+                    ColumnDisplayFormat.DateTime => FormatDateTimeValue(value),
+                    _ => value
+                };
+            }
+
+            formattedRows[rowIndex] = formatted;
+        }
+
+        return new TabularData(data.Columns, formattedRows);
+    }
+
+    private enum ColumnDisplayFormat
+    {
+        None,
+        Integer,
+        DateTime
+    }
+
+    private static ColumnDisplayFormat DetectColumnDisplayFormat(TabularData data, int columnIndex)
+    {
+        var couldBeInteger = true;
+        var couldBeDateTime = true;
+        var hasValue = false;
+
+        foreach (var row in data.Rows)
+        {
+            if (columnIndex >= row.Count)
+            {
+                continue;
+            }
+
+            var value = row[columnIndex];
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            hasValue = true;
+
+            if (couldBeInteger)
+            {
+                couldBeInteger = IsFormattableInteger(value);
+            }
+
+            if (couldBeDateTime)
+            {
+                couldBeDateTime = IsKustoDateTimeFormat(value);
+            }
+
+            if (!couldBeInteger && !couldBeDateTime)
+            {
+                break;
+            }
+        }
+
+        if (!hasValue)
+        {
+            return ColumnDisplayFormat.None;
+        }
+
+        if (couldBeDateTime)
+        {
+            return ColumnDisplayFormat.DateTime;
+        }
+
+        if (couldBeInteger)
+        {
+            return ColumnDisplayFormat.Integer;
+        }
+
+        return ColumnDisplayFormat.None;
+    }
+
+    private static bool IsFormattableInteger(string value)
+    {
+        if (value.Length == 0)
+        {
+            return false;
+        }
+
+        // Reject leading '+' (could be a non-numeric identifier)
+        if (value[0] == '+')
+        {
+            return false;
+        }
+
+        // Reject leading zeros (could be an ID like "00123"), except "0" and "-0"
+        var digitStart = value[0] == '-' ? 1 : 0;
+        if (digitStart < value.Length - 1 && value[digitStart] == '0')
+        {
+            return false;
+        }
+
+        return long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
+    }
+
+    private static bool IsKustoDateTimeFormat(string value)
+    {
+        return DateTimeOffset.TryParseExact(
+            value,
+            KustoDateTimeFormats,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out _);
+    }
+
+    private static string? FormatIntegerValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        if (!long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number))
+        {
+            return value;
+        }
+
+        return number.ToString("N0", CultureInfo.InvariantCulture);
+    }
+
+    private static string? FormatDateTimeValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        if (!DateTimeOffset.TryParseExact(value, KustoDateTimeFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
+        {
+            return value;
+        }
+
+        if (dt.TimeOfDay == TimeSpan.Zero)
+        {
+            return dt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        }
+
+        var hasFractionalSeconds = dt.TimeOfDay.Ticks % TimeSpan.TicksPerSecond != 0;
+        return hasFractionalSeconds
+            ? dt.ToString("yyyy-MM-dd HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture)
+            : dt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
     }
 
     private static int[] FitWidths(int[] naturalWidths, int? maxWidth, int minimumWidth, int frameWidth)

@@ -411,4 +411,28 @@ public sealed class OutputFormatterTests
         Assert.Contains("```mermaid", rendered, StringComparison.Ordinal);
         Assert.Contains("pie showData", rendered, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData(OutputFormat.Json)]
+    [InlineData(OutputFormat.Markdown)]
+    [InlineData(OutputFormat.Csv)]
+    public void Format_NonHumanOutputFormats_PreserveRawValues(OutputFormat format)
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            IsQueryResultTable = true,
+            Table = new TabularData(
+                ["Day", "RowCount"],
+                [
+                    ["2026-02-27T00:00:00Z", "66380993"]
+                ])
+        };
+
+        var rendered = formatter.Format(output, format);
+
+        Assert.Contains("2026-02-27T00:00:00Z", rendered, StringComparison.Ordinal);
+        Assert.Contains("66380993", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("66,380,993", rendered, StringComparison.Ordinal);
+    }
 }
