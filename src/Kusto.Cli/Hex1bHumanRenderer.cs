@@ -95,10 +95,21 @@ internal static class Hex1bHumanRenderer
         }
 
         var columnCount = data.Columns.Count;
-        var headerLines = data.Columns
+
+        // Detect column alignment from raw (unformatted) data
+        var rightAlignedColumns = new bool[columnCount];
+        for (var i = 0; i < columnCount; i++)
+        {
+            rightAlignedColumns[i] = ShouldRightAlignColumn(data, i);
+        }
+
+        // Format cell values for human display (thousand separators, smart datetimes)
+        var displayData = FormatQueryTableForDisplay(data);
+
+        var headerLines = displayData.Columns
             .Select(header => SplitCellLines(header).AsReadOnly())
             .ToArray();
-        var normalizedRows = data.Rows
+        var normalizedRows = displayData.Rows
             .Select(row => Enumerable.Range(0, columnCount)
                 .Select(index => index < row.Count ? SplitCellLines(row[index]) : [string.Empty])
                 .ToArray())
@@ -118,16 +129,10 @@ internal static class Hex1bHumanRenderer
             }
         }
 
-        var rightAlignedColumns = new bool[columnCount];
-        for (var i = 0; i < columnCount; i++)
-        {
-            rightAlignedColumns[i] = ShouldRightAlignColumn(data, i);
-        }
-
         widths = FitWidths(widths, maxWidth, minimumWidth: 3, frameWidth: GetCompactTableFrameWidth(columnCount));
-        if (ShouldUseRecordLayout(data, widths, maxWidth))
+        if (ShouldUseRecordLayout(displayData, widths, maxWidth))
         {
-            return FormatQueryRowsAsRecords(data, maxWidth);
+            return FormatQueryRowsAsRecords(displayData, maxWidth);
         }
 
         var wrappedHeaders = WrapCells(headerLines, widths);
@@ -144,6 +149,71 @@ internal static class Hex1bHumanRenderer
         }
 
         return builder.ToString().TrimEnd();
+    }
+
+    private static TabularData FormatQueryTableForDisplay(TabularData data)
+    {
+        var formattedRows = new List<IReadOnlyList<string?>>(data.Rows.Count);
+        foreach (var row in data.Rows)
+        {
+            var formattedRow = new string?[row.Count];
+            for (var i = 0; i < row.Count; i++)
+            {
+                formattedRow[i] = FormatCellValueForDisplay(row[i]);
+            }
+
+            formattedRows.Add(formattedRow);
+        }
+
+        return new TabularData(data.Columns, formattedRows);
+    }
+
+    internal static string? FormatCellValueForDisplay(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        // Skip zero-padded values that are likely identifiers (e.g., "001234")
+        var numericStart = value[0] == '-' ? 1 : 0;
+        if (value.Length > numericStart + 1 && value[numericStart] == '0' && char.IsDigit(value[numericStart + 1]))
+        {
+            return value;
+        }
+
+        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var longValue))
+        {
+            return longValue.ToString("N0", CultureInfo.InvariantCulture);
+        }
+
+        if (decimal.TryParse(value, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var decimalValue))
+        {
+            var dotIndex = value.IndexOf('.');
+            if (dotIndex >= 0)
+            {
+                var decimalPlaces = value.Length - dotIndex - 1;
+                return decimalValue.ToString($"N{decimalPlaces}", CultureInfo.InvariantCulture);
+            }
+
+            return decimalValue.ToString("N0", CultureInfo.InvariantCulture);
+        }
+
+        // Format ISO 8601 datetime strings (YYYY-MM-DDTHH:mm:ss...)
+        if (value.Length >= 20 &&
+            char.IsDigit(value[0]) && value[4] == '-' && value[7] == '-' && value[10] == 'T' &&
+            DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dateTimeValue))
+        {
+            if (dateTimeValue.TimeOfDay == TimeSpan.Zero)
+            {
+                return dateTimeValue.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
+
+            // Non-midnight: replace T with space for readability, preserving timezone
+            return string.Concat(value.AsSpan(0, 10), " ", value.AsSpan(11));
+        }
+
+        return value;
     }
 
     private static string FormatQueryRowsAsRecords(TabularData data, int? maxWidth)

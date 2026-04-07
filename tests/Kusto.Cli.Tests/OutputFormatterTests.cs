@@ -411,4 +411,90 @@ public sealed class OutputFormatterTests
         Assert.Contains("```mermaid", rendered, StringComparison.Ordinal);
         Assert.Contains("pie showData", rendered, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void FormatHuman_QueryTableOutput_FormatsNumbersAndDatetimes()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            IsQueryResultTable = true,
+            Table = new TabularData(
+                ["Day", "RowCount"],
+                [
+                    ["2026-02-27T00:00:00Z", "66380993"],
+                    ["2026-02-28T00:00:00Z", "19639740"]
+                ])
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Human);
+
+        Assert.Contains("66,380,993", rendered, StringComparison.Ordinal);
+        Assert.Contains("19,639,740", rendered, StringComparison.Ordinal);
+        Assert.Contains("2026-02-27", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("T00:00:00Z", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatJson_QueryTableOutput_DoesNotFormatValues()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            IsQueryResultTable = true,
+            Table = new TabularData(
+                ["Day", "RowCount"],
+                [
+                    ["2026-02-27T00:00:00Z", "66380993"]
+                ])
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Json);
+
+        Assert.Contains("66380993", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("66,380,993", rendered, StringComparison.Ordinal);
+        Assert.Contains("2026-02-27T00:00:00Z", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatCsv_QueryTableOutput_DoesNotFormatValues()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            IsQueryResultTable = true,
+            Table = new TabularData(
+                ["Day", "RowCount"],
+                [
+                    ["2026-02-27T00:00:00Z", "66380993"]
+                ])
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Csv);
+
+        Assert.Contains("66380993", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("66,380,993", rendered, StringComparison.Ordinal);
+        Assert.Contains("2026-02-27T00:00:00Z", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatMarkdown_QueryTableOutput_DoesNotFormatValues()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            IsQueryResultTable = true,
+            Table = new TabularData(
+                ["Day", "RowCount"],
+                [
+                    ["2026-02-27T00:00:00Z", "66380993"]
+                ])
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Markdown);
+
+        Assert.Contains("66380993", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("66,380,993", rendered, StringComparison.Ordinal);
+        Assert.Contains("2026-02-27T00:00:00Z", rendered, StringComparison.Ordinal);
+    }
 }
