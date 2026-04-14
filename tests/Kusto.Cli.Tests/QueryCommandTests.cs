@@ -83,6 +83,72 @@ public sealed class QueryCommandTests
     }
 
     [Fact]
+    public async Task Query_WithTsvFormatAndChart_ReturnsError()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var originalError = Console.Error;
+        using var errorWriter = new StringWriter();
+        Console.SetError(errorWriter);
+
+        try
+        {
+            var exitCode = await rootCommand.Parse(["--format", "tsv", "query", "print 1", "--chart"], new ParserConfiguration())
+                .InvokeAsync();
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("--chart can't be used with --format tsv.", errorWriter.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+    }
+
+    [Fact]
+    public async Task Query_WithTsvFormatAndShowStats_ReturnsError()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var originalError = Console.Error;
+        using var errorWriter = new StringWriter();
+        Console.SetError(errorWriter);
+
+        try
+        {
+            var exitCode = await rootCommand.Parse(["--format", "tsv", "query", "print 1", "--show-stats"], new ParserConfiguration())
+                .InvokeAsync();
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("--show-stats can't be used with --format tsv.", errorWriter.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+    }
+
+    [Fact]
+    public async Task ClusterList_WithTsvFormat_ReturnsError()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var originalError = Console.Error;
+        using var errorWriter = new StringWriter();
+        Console.SetError(errorWriter);
+
+        try
+        {
+            var exitCode = await rootCommand.Parse(["cluster", "list", "--format", "tsv"], new ParserConfiguration())
+                .InvokeAsync();
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("'tsv' is not supported for this command.", errorWriter.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+    }
+
+    [Fact]
     public async Task Query_WithInvalidSyntax_ReturnsValidationError()
     {
         var rootCommand = CommandFactory.CreateRootCommand();

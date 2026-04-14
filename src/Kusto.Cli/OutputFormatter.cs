@@ -13,6 +13,7 @@ public sealed class OutputFormatter : IOutputFormatter
             OutputFormat.Json => JsonSerializer.Serialize(output, KustoJsonSerializerContext.Default.CliOutput),
             OutputFormat.Markdown => FormatMarkdown(output),
             OutputFormat.Csv => FormatCsv(output),
+            OutputFormat.Tsv => FormatTsv(output),
             _ => FormatHuman(output)
         };
     }
@@ -137,6 +138,43 @@ public sealed class OutputFormatter : IOutputFormatter
         }
 
         return buffer.ToString().TrimEnd('\r', '\n');
+    }
+
+    private static string FormatTsv(CliOutput output)
+    {
+        if (output.Table is not { Columns.Count: > 0 } table)
+        {
+            return string.Empty;
+        }
+
+        var buffer = new StringBuilder();
+        buffer.AppendLine(string.Join('\t', table.Columns.Select(EscapeTsvValue)));
+
+        foreach (var row in table.Rows)
+        {
+            buffer.AppendLine(string.Join('\t', row.Select(EscapeTsvValue)));
+        }
+
+        return buffer.ToString().TrimEnd('\r', '\n');
+    }
+
+    private static string EscapeTsvValue(string? value)
+    {
+        var text = value ?? string.Empty;
+        if (!text.Contains('\\') &&
+            !text.Contains('\t') &&
+            !text.Contains('\r') &&
+            !text.Contains('\n'))
+        {
+            return text;
+        }
+
+        return text
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\t", "\\t", StringComparison.Ordinal)
+            .Replace("\r\n", "\\n", StringComparison.Ordinal)
+            .Replace("\r", "\\n", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal);
     }
 
     private static Dictionary<string, string?> BuildDisplayProperties(CliOutput output)

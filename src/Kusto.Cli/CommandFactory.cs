@@ -8,11 +8,11 @@ public static class CommandFactory
     {
         var formatOption = new Option<string>("--format")
         {
-            Description = "Output format for people or tools: human, json, markdown, md, csv (query only).",
+            Description = "Output format for people or tools: human, json, markdown, md, csv (query only), tsv (query only).",
             Recursive = true,
             DefaultValueFactory = _ => "human"
         };
-        formatOption.AcceptOnlyFromAmong("human", "json", "markdown", "md", "csv");
+        formatOption.AcceptOnlyFromAmong("human", "json", "markdown", "md", "csv", "tsv");
 
         var logLevelOption = new Option<string?>("--log-level")
         {
@@ -836,14 +836,15 @@ public static class CommandFactory
                 var isMarkdownOutput = string.Equals(format, "markdown", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(format, "md", StringComparison.OrdinalIgnoreCase);
                 var isCsvOutput = string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase);
-                if (showChart && (isJsonOutput || isCsvOutput))
+                var isTsvOutput = string.Equals(format, "tsv", StringComparison.OrdinalIgnoreCase);
+                if (showChart && (isJsonOutput || isCsvOutput || isTsvOutput))
                 {
                     throw new UserFacingException($"--chart can't be used with --format {format.ToLowerInvariant()}.");
                 }
 
-                if (showStats && isCsvOutput)
+                if (showStats && (isCsvOutput || isTsvOutput))
                 {
-                    throw new UserFacingException("--show-stats can't be used with --format csv.");
+                    throw new UserFacingException($"--show-stats can't be used with --format {format.ToLowerInvariant()}.");
                 }
 
                 var config = await runtime.ConfigStore.LoadAsync(ct);
@@ -899,7 +900,7 @@ public static class CommandFactory
                             }
                         }
                     }
-                    else if (!isMarkdownOutput && !isCsvOutput && compatibility.HumanChart is not null)
+                    else if (!isMarkdownOutput && !isCsvOutput && !isTsvOutput && compatibility.HumanChart is not null)
                     {
                         chartHint = "This query can be rendered as a terminal chart. Re-run with --chart to see it.";
                     }
@@ -918,7 +919,7 @@ public static class CommandFactory
                     MarkdownChart = markdownChart,
                     IsQueryResultTable = true
                 };
-            }, cancellationToken, OutputFormat.Human, OutputFormat.Json, OutputFormat.Markdown, OutputFormat.Csv);
+            }, cancellationToken, OutputFormat.Human, OutputFormat.Json, OutputFormat.Markdown, OutputFormat.Csv, OutputFormat.Tsv);
         });
 
         return queryCommand;
