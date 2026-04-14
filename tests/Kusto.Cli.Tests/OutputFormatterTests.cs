@@ -100,6 +100,41 @@ public sealed class OutputFormatterTests
     }
 
     [Fact]
+    public void FormatYaml_QueryOutput_IncludesWebExplorerUrlAndStatistics()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(["Name"], [["alpha"]]),
+            WebExplorerUrl = "https://dataexplorer.azure.com/clusters/help.kusto.windows.net/databases/Samples?query=abc",
+            Statistics = new QueryStatistics
+            {
+                ExecutionTimeSec = 1.23,
+                Network = new QueryNetworkStatistics
+                {
+                    CrossClusterMb = 5.2
+                }
+            },
+            ChartHint = "not included",
+            HumanChart = "not included"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Yaml);
+
+        Assert.Contains("\"message\": null", rendered, StringComparison.Ordinal);
+        Assert.Contains("\"table\":", rendered, StringComparison.Ordinal);
+        Assert.Contains("\"columns\":", rendered, StringComparison.Ordinal);
+        Assert.Contains("- \"Name\"", rendered, StringComparison.Ordinal);
+        Assert.Contains("\"properties\": null", rendered, StringComparison.Ordinal);
+        Assert.Contains("\"webExplorerUrl\": \"https://dataexplorer.azure.com/clusters/help.kusto.windows.net/databases/Samples?query=abc\"", rendered, StringComparison.Ordinal);
+        Assert.Contains("\"statistics\":", rendered, StringComparison.Ordinal);
+        Assert.Contains("\"executionTimeSec\": 1.23", rendered, StringComparison.Ordinal);
+        Assert.Contains("\"crossClusterMb\": 5.2", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"chartHint\"", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"humanChart\"", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FormatCsv_TableOutput_UsesHeadersAndRows()
     {
         var formatter = new OutputFormatter();
@@ -343,6 +378,32 @@ public sealed class OutputFormatterTests
         Assert.Equal("State", document.RootElement.GetProperty("visualization").GetProperty("xColumn").GetString());
         Assert.Equal("Count", document.RootElement.GetProperty("visualization").GetProperty("yColumns")[0].GetString());
         Assert.Equal("{\"Visualization\":\"piechart\"}", document.RootElement.GetProperty("visualization").GetProperty("raw").GetString());
+    }
+
+    [Fact]
+    public void FormatYaml_QueryOutput_WithVisualization_IncludesStructuredMetadata()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(["State"], [["TEXAS"]]),
+            Visualization = new QueryVisualization
+            {
+                Visualization = "piechart",
+                Title = "Top states",
+                XColumn = "State",
+                YColumns = ["Count"],
+                Raw = "{\"Visualization\":\"piechart\"}"
+            }
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Yaml);
+
+        Assert.Contains("\"visualization\":", rendered, StringComparison.Ordinal);
+        Assert.Contains("\"title\": \"Top states\"", rendered, StringComparison.Ordinal);
+        Assert.Contains("\"xColumn\": \"State\"", rendered, StringComparison.Ordinal);
+        Assert.Contains("- \"Count\"", rendered, StringComparison.Ordinal);
+        Assert.Contains("\"raw\": \"{\\\"Visualization\\\":\\\"piechart\\\"}\"", rendered, StringComparison.Ordinal);
     }
 
     [Fact]

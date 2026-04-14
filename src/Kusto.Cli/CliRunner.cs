@@ -8,6 +8,7 @@ public static class CliRunner
     [
         OutputFormat.Human,
         OutputFormat.Json,
+        OutputFormat.Yaml,
         OutputFormat.Markdown
     ];
 
@@ -15,6 +16,7 @@ public static class CliRunner
     [
         OutputFormat.Human,
         OutputFormat.Json,
+        OutputFormat.Yaml,
         OutputFormat.Markdown,
         OutputFormat.Csv
     ];
@@ -78,6 +80,7 @@ public static class CliRunner
         {
             "human" => OutputFormat.Human,
             "json" => OutputFormat.Json,
+            "yaml" => OutputFormat.Yaml,
             "markdown" => OutputFormat.Markdown,
             "md" => OutputFormat.Markdown,
             "csv" => OutputFormat.Csv,
@@ -162,6 +165,11 @@ public static class CliRunner
         if (uniqueFormats.Contains(OutputFormat.Json))
         {
             tokens.Add("json");
+        }
+
+        if (uniqueFormats.Contains(OutputFormat.Yaml))
+        {
+            tokens.Add("yaml");
         }
 
         if (uniqueFormats.Contains(OutputFormat.Markdown))

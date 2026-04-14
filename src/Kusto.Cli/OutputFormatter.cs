@@ -11,10 +11,19 @@ public sealed class OutputFormatter : IOutputFormatter
         return format switch
         {
             OutputFormat.Json => JsonSerializer.Serialize(output, KustoJsonSerializerContext.Default.CliOutput),
+            OutputFormat.Yaml => FormatYaml(output),
             OutputFormat.Markdown => FormatMarkdown(output),
             OutputFormat.Csv => FormatCsv(output),
             _ => FormatHuman(output)
         };
+    }
+
+    private static string FormatYaml(CliOutput output)
+    {
+        var yaml = new StringBuilder();
+        var root = JsonSerializer.SerializeToElement(output, KustoJsonSerializerContext.Default.CliOutput);
+        AppendYamlValue(yaml, root, 0);
+        return yaml.ToString().TrimEnd();
     }
 
     private static string FormatHuman(CliOutput output)
@@ -278,6 +287,114 @@ public sealed class OutputFormatter : IOutputFormatter
         }
 
         return $"\"{text.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+    }
+
+    private static void AppendYamlValue(StringBuilder buffer, JsonElement value, int indentLevel)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                AppendYamlObject(buffer, value, indentLevel);
+                break;
+            case JsonValueKind.Array:
+                AppendYamlArray(buffer, value, indentLevel);
+                break;
+            case JsonValueKind.String:
+                buffer.Append(FormatYamlString(value.GetString() ?? string.Empty));
+                break;
+            case JsonValueKind.Number:
+            case JsonValueKind.True:
+            case JsonValueKind.False:
+            case JsonValueKind.Null:
+                buffer.Append(value.GetRawText());
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported JSON value kind '{value.ValueKind}' for YAML formatting.");
+        }
+    }
+
+    private static void AppendYamlObject(StringBuilder buffer, JsonElement value, int indentLevel)
+    {
+        var properties = value.EnumerateObject().ToArray();
+        if (properties.Length == 0)
+        {
+            buffer.Append("{}");
+            return;
+        }
+
+        foreach (var property in properties)
+        {
+            AppendIndent(buffer, indentLevel);
+            buffer.Append(FormatYamlString(property.Name));
+            buffer.Append(':');
+
+            if (ShouldInlineYamlValue(property.Value))
+            {
+                buffer.Append(' ');
+                AppendYamlValue(buffer, property.Value, indentLevel);
+                buffer.AppendLine();
+                continue;
+            }
+
+            buffer.AppendLine();
+            AppendYamlValue(buffer, property.Value, indentLevel + 1);
+        }
+    }
+
+    private static void AppendYamlArray(StringBuilder buffer, JsonElement value, int indentLevel)
+    {
+        var itemCount = value.GetArrayLength();
+        if (itemCount == 0)
+        {
+            buffer.Append("[]");
+            return;
+        }
+
+        foreach (var item in value.EnumerateArray())
+        {
+            AppendIndent(buffer, indentLevel);
+            buffer.Append('-');
+
+            if (ShouldInlineYamlValue(item))
+            {
+                buffer.Append(' ');
+                AppendYamlValue(buffer, item, indentLevel);
+                buffer.AppendLine();
+                continue;
+            }
+
+            buffer.AppendLine();
+            AppendYamlValue(buffer, item, indentLevel + 1);
+        }
+    }
+
+    private static bool ShouldInlineYamlValue(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.Object => !value.EnumerateObject().Any(),
+            JsonValueKind.Array => value.GetArrayLength() == 0,
+            _ => true
+        };
+    }
+
+    private static void AppendIndent(StringBuilder buffer, int indentLevel)
+    {
+        buffer.Append(' ', indentLevel * 2);
+    }
+
+    private static string FormatYamlString(string value)
+    {
+        var escaped = value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal)
+            .Replace("\b", "\\b", StringComparison.Ordinal)
+            .Replace("\f", "\\f", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal)
+            .Replace("\r", "\\r", StringComparison.Ordinal)
+            .Replace("\t", "\\t", StringComparison.Ordinal);
+
+        return $"\"{escaped}\"";
     }
 
     private static string BuildHumanTextOutput(CliOutput output, int? availableWidth)
