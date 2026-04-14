@@ -215,11 +215,12 @@ public sealed class OutputFormatterTests
 
         var rendered = formatter.Format(output, OutputFormat.Tsv);
 
+        var expectedNewlineEscape = Environment.NewLine == "\r\n" ? "\\r\\n" : "\\n";
         var expected = string.Join(
             Environment.NewLine,
             [
                 "Name\tNotes\tPath",
-                "alpha\\tbeta\tline1\\nline2\tc:\\\\data\\\\file"
+                $"alpha\\tbeta\tline1{expectedNewlineEscape}line2\tc:\\\\data\\\\file"
             ]);
         Assert.Equal(expected, rendered);
     }

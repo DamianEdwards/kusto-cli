@@ -172,8 +172,8 @@ public sealed class OutputFormatter : IOutputFormatter
         return text
             .Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("\t", "\\t", StringComparison.Ordinal)
-            .Replace("\r\n", "\\n", StringComparison.Ordinal)
-            .Replace("\r", "\\n", StringComparison.Ordinal)
+            .Replace("\r\n", "\\r\\n", StringComparison.Ordinal)
+            .Replace("\r", "\\r", StringComparison.Ordinal)
             .Replace("\n", "\\n", StringComparison.Ordinal);
     }
 
