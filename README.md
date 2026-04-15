@@ -66,6 +66,9 @@ kusto query --format markdown --chart "StormEvents | summarize Count=count() by 
 # Emit machine-readable JSON for scripts or other automation
 kusto query "StormEvents | take 2" --format json
 
+# JSON output works on other commands too
+kusto database list --format json
+
 # Redirect query results directly to CSV
 kusto query "StormEvents | summarize EventCount = count() by State | top 10 by EventCount desc" --format csv > top-states.csv
 
@@ -73,7 +76,7 @@ kusto query "StormEvents | summarize EventCount = count() by State | top 10 by E
 kusto examples
 ```
 
-Use `--format json` when you want stable, machine-readable query output for scripts, automation, or downstream tools.
+Use `--format json` when you want stable, machine-readable output from queries or metadata commands for scripts, automation, or downstream tools.
 
 ## Configuration
 
