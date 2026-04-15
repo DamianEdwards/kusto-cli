@@ -63,12 +63,17 @@ kusto query --chart "StormEvents | summarize Count=count() by State | top 5 by C
 # Emit Mermaid markdown for a compatible render query
 kusto query --format markdown --chart "StormEvents | summarize Count=count() by State | top 5 by Count desc | render piechart"
 
+# Emit machine-readable JSON for scripts or other automation
+kusto query "StormEvents | take 2" --format json
+
 # Redirect query results directly to CSV
 kusto query "StormEvents | summarize EventCount = count() by State | top 10 by EventCount desc" --format csv > top-states.csv
 
 # Need copy/paste examples?
 kusto examples
 ```
+
+Use `--format json` when you want stable, machine-readable query output for scripts, automation, or downstream tools.
 
 ## Configuration
 
