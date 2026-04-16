@@ -13,6 +13,7 @@ public sealed class OutputFormatter : IOutputFormatter
             OutputFormat.Json => JsonSerializer.Serialize(output, KustoJsonSerializerContext.Default.CliOutput),
             OutputFormat.Markdown => FormatMarkdown(output),
             OutputFormat.Csv => FormatCsv(output),
+            OutputFormat.Tsv => FormatTsv(output),
             _ => FormatHuman(output)
         };
     }
@@ -122,6 +123,12 @@ public sealed class OutputFormatter : IOutputFormatter
     }
 
     private static string FormatCsv(CliOutput output)
+        => FormatDelimited(output, ',');
+
+    private static string FormatTsv(CliOutput output)
+        => FormatDelimited(output, '\t');
+
+    private static string FormatDelimited(CliOutput output, char delimiter)
     {
         if (output.Table is not { Columns.Count: > 0 } table)
         {
@@ -129,11 +136,11 @@ public sealed class OutputFormatter : IOutputFormatter
         }
 
         var buffer = new StringBuilder();
-        AppendCsvRow(buffer, table.Columns);
+        AppendDelimitedRow(buffer, table.Columns, delimiter);
 
         foreach (var row in table.Rows)
         {
-            AppendCsvRow(buffer, row);
+            AppendDelimitedRow(buffer, row, delimiter);
         }
 
         return buffer.ToString().TrimEnd('\r', '\n');
@@ -249,27 +256,27 @@ public sealed class OutputFormatter : IOutputFormatter
         }
     }
 
-    private static void AppendCsvRow(StringBuilder buffer, IEnumerable<string?> values)
+    private static void AppendDelimitedRow(StringBuilder buffer, IEnumerable<string?> values, char delimiter)
     {
         var firstValue = true;
         foreach (var value in values)
         {
             if (!firstValue)
             {
-                buffer.Append(',');
+                buffer.Append(delimiter);
             }
 
-            buffer.Append(EscapeCsvValue(value));
+            buffer.Append(EscapeDelimitedValue(value, delimiter));
             firstValue = false;
         }
 
         buffer.AppendLine();
     }
 
-    private static string EscapeCsvValue(string? value)
+    private static string EscapeDelimitedValue(string? value, char delimiter)
     {
         var text = value ?? string.Empty;
-        if (!text.Contains(',', StringComparison.Ordinal) &&
+        if (!text.Contains(delimiter) &&
             !text.Contains('"', StringComparison.Ordinal) &&
             !text.Contains('\r') &&
             !text.Contains('\n'))
