@@ -13,6 +13,7 @@ irm https://kusto.damianedwards.dev/install.ps1 | iex
 ## Install on macOS or Linux
 
 Grab the relevant executable asset from the latest [release](https://github.com/DamianEdwards/kusto-cli/releases).
+After downloading it, you may need to run `chmod +x <asset>` before first use.
 
 ## What this CLI supports
 
