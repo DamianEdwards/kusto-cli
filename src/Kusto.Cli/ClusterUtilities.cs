@@ -2,6 +2,71 @@ namespace Kusto.Cli;
 
 public static class ClusterUtilities
 {
+    // Fixed Kusto hostnames that front ADX as a proxy (ADE / AzureMonitor / Aria / security
+    // platform). Unlike classic ADX clusters (e.g., *.kusto.windows.net), a request to these
+    // hosts may carry a workspace- or resource-specific path that MUST be preserved end-to-end;
+    // collapsing to the bare hostname causes the proxy to reject the request
+    // (e.g., InvalidClusterHostName from prod-adxproxy).
+    //
+    // Source: the AllowedKustoHostnames entries in the public well-known Kusto endpoints list
+    // shipped with the official Azure Data Explorer SDKs (MIT). The list below is the union
+    // across all sovereign clouds. The azure-kusto-python copy is the superset authoritative
+    // reference today:
+    //   https://github.com/Azure/azure-kusto-python/blob/master/azure-kusto-data/azure/kusto/data/wellKnownKustoEndpoints.json
+    // Mirrored (and kept in sync) by azure-kusto-go:
+    //   https://github.com/Azure/azure-kusto-go/blob/master/azkustodata/trusted_endpoints/well_known_kusto_endpoints.json
+    private static readonly HashSet<string> ProxyHosts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Public cloud (login.microsoftonline.com)
+        "ade.applicationinsights.io",
+        "ade.loganalytics.io",
+        "adx.aimon.applicationinsights.azure.com",
+        "adx.applicationinsights.azure.com",
+        "adx.int.applicationinsights.azure.com",
+        "adx.int.loganalytics.azure.com",
+        "adx.int.monitor.azure.com",
+        "adx.loganalytics.azure.com",
+        "adx.monitor.azure.com",
+        "kusto.aria.microsoft.com",
+        "eu.kusto.aria.microsoft.com",
+        "api.securityplatform.microsoft.com",
+
+        // US Government (Fairfax)
+        "adx.applicationinsights.azure.us",
+        "adx.loganalytics.azure.us",
+        "adx.monitor.azure.us",
+
+        // China (Mooncake)
+        "adx.applicationinsights.azure.cn",
+        "adx.loganalytics.azure.cn",
+        "adx.monitor.azure.cn",
+
+        // US Nat (EagleX)
+        "adx.applicationinsights.azure.eaglex.ic.gov",
+        "adx.loganalytics.azure.eaglex.ic.gov",
+        "adx.monitor.azure.eaglex.ic.gov",
+
+        // US Sec (scloud)
+        "adx.applicationinsights.azure.microsoft.scloud",
+        "adx.loganalytics.azure.microsoft.scloud",
+        "adx.monitor.azure.microsoft.scloud",
+
+        // France sovereign (Bleu)
+        "adx.applicationinsights.azure.fr",
+        "adx.loganalytics.azure.fr",
+        "adx.monitor.azure.fr",
+
+        // Germany sovereign (Delos)
+        "adx.applicationinsights.azure.de",
+        "adx.loganalytics.azure.de",
+        "adx.monitor.azure.de",
+
+        // Singapore sovereign (GovSG)
+        "adx.applicationinsights.azure.sg",
+        "adx.loganalytics.azure.sg",
+        "adx.monitor.azure.sg",
+    };
+
     public static string NormalizeClusterUrl(string clusterUrl)
     {
         if (!Uri.TryCreate(clusterUrl, UriKind.Absolute, out var uri) ||
@@ -10,8 +75,21 @@ public static class ClusterUtilities
             throw new UserFacingException($"'{clusterUrl}' is not a valid cluster URL.");
         }
 
+        if (IsProxyHost(uri.Host) && uri.AbsolutePath.Length > 1)
+        {
+            var builder = new UriBuilder(uri)
+            {
+                Query = string.Empty,
+                Fragment = string.Empty,
+            };
+
+            return builder.Uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+        }
+
         return uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
     }
+
+    public static bool IsProxyHost(string host) => ProxyHosts.Contains(host);
 
     public static KnownCluster? FindKnownCluster(KustoConfig config, string clusterReference)
     {

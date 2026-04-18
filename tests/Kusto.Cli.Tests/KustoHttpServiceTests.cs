@@ -522,6 +522,83 @@ public sealed class KustoHttpServiceTests
         Assert.Equal("'Sam'", propertiesElement.GetProperty("Parameters").GetProperty("filterValue").GetString());
     }
 
+    [Fact]
+    public async Task ExecuteQueryAsync_WithAdeProxyUrl_PreservesFullResourcePathInRequestUri()
+    {
+        const string responseJson =
+            """
+            [
+              { "FrameType": "DataSetHeader", "IsProgressive": false },
+              {
+                "FrameType": "DataTable",
+                "TableName": "PrimaryResult",
+                "TableKind": "PrimaryResult",
+                "Columns": [{ "ColumnName": "TimeGenerated", "ColumnType": "datetime" }],
+                "Rows": [["2026-01-01T00:00:00Z"]]
+              },
+              { "FrameType": "DataSetCompletion", "HasErrors": false }
+            ]
+            """;
+        var handler = new RecordingHandler(() => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson)
+        });
+        using var httpClient = new HttpClient(handler);
+        var service = new KustoHttpService(httpClient, new StaticTokenProvider("fake-token"), NullLogger<KustoHttpService>.Instance);
+
+        const string adeUrl = "https://ade.applicationinsights.io/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/rg/providers/Microsoft.OperationalInsights/workspaces/ws";
+
+        _ = await service.ExecuteQueryAsync(
+            adeUrl,
+            "ws",
+            "AppTraces | take 1",
+            includeStatistics: false,
+            CancellationToken.None);
+
+        Assert.NotNull(handler.LastRequestUri);
+        Assert.Equal(
+            adeUrl + "/v2/rest/query",
+            handler.LastRequestUri!.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task ExecuteManagementCommandAsync_WithAdeProxyUrl_PreservesFullResourcePathInRequestUri()
+    {
+        const string responseJson =
+            """
+            {
+              "Tables": [
+                {
+                  "TableName": "PrimaryResult",
+                  "TableKind": "PrimaryResult",
+                  "Columns": [{ "ColumnName": "TableName", "DataType": "string" }],
+                  "Rows": [["AppTraces"]]
+                }
+              ]
+            }
+            """;
+        var handler = new RecordingHandler(() => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson)
+        });
+        using var httpClient = new HttpClient(handler);
+        var service = new KustoHttpService(httpClient, new StaticTokenProvider("fake-token"), NullLogger<KustoHttpService>.Instance);
+
+        const string adeUrl = "https://adx.monitor.azure.com/subscriptions/sub/resourcegroups/rg/providers/microsoft.insights/components/app";
+
+        _ = await service.ExecuteManagementCommandAsync(
+            adeUrl,
+            "app",
+            ".show tables",
+            null,
+            CancellationToken.None);
+
+        Assert.NotNull(handler.LastRequestUri);
+        Assert.Equal(
+            adeUrl + "/v1/rest/mgmt",
+            handler.LastRequestUri!.AbsoluteUri);
+    }
+
     private sealed class StaticTokenProvider(string token) : ITokenProvider
     {
         public Task<string> GetTokenAsync(string clusterUrl, CancellationToken cancellationToken)
@@ -537,12 +614,14 @@ public sealed class KustoHttpServiceTests
         public string? LastAuthorizationScheme { get; private set; }
         public string? LastAuthorizationParameter { get; private set; }
         public string? LastRequestBody { get; private set; }
+        public Uri? LastRequestUri { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastAuthorizationScheme = request.Headers.Authorization?.Scheme;
             LastAuthorizationParameter = request.Headers.Authorization?.Parameter;
             LastRequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+            LastRequestUri = request.RequestUri;
             return _responseFactory();
         }
     }
