@@ -12,6 +12,7 @@ public sealed class OutputFormatter : IOutputFormatter
         {
             OutputFormat.Json => JsonSerializer.Serialize(output, KustoJsonSerializerContext.Default.CliOutput),
             OutputFormat.Markdown => FormatMarkdown(output),
+            OutputFormat.Yaml => FormatYaml(output),
             OutputFormat.Csv => FormatCsv(output),
             _ => FormatHuman(output)
         };
@@ -137,6 +138,14 @@ public sealed class OutputFormatter : IOutputFormatter
         }
 
         return buffer.ToString().TrimEnd('\r', '\n');
+    }
+
+    private static string FormatYaml(CliOutput output)
+    {
+        var root = JsonSerializer.SerializeToElement(output, KustoJsonSerializerContext.Default.CliOutput);
+        var buffer = new StringBuilder();
+        AppendYamlValue(buffer, root, 0);
+        return buffer.ToString().TrimEnd();
     }
 
     private static Dictionary<string, string?> BuildDisplayProperties(CliOutput output)
@@ -278,6 +287,246 @@ public sealed class OutputFormatter : IOutputFormatter
         }
 
         return $"\"{text.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+    }
+
+    private static void AppendYamlValue(StringBuilder buffer, JsonElement value, int indent)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                AppendYamlObject(buffer, value, indent);
+                break;
+            case JsonValueKind.Array:
+                AppendYamlArray(buffer, value, indent);
+                break;
+            default:
+                AppendIndent(buffer, indent);
+                AppendYamlInlineScalar(buffer, value);
+                buffer.AppendLine();
+                break;
+        }
+    }
+
+    private static void AppendYamlObject(StringBuilder buffer, JsonElement value, int indent)
+    {
+        var properties = value
+            .EnumerateObject()
+            .Where(property => property.Value.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+            .ToList();
+        if (properties.Count == 0)
+        {
+            AppendIndent(buffer, indent);
+            buffer.AppendLine("{}");
+            return;
+        }
+
+        foreach (var property in properties)
+        {
+            AppendIndent(buffer, indent);
+            buffer.Append(EscapeYamlKey(property.Name));
+            if (TryAppendYamlInlineValue(buffer, property.Value, indent + 2))
+            {
+                buffer.AppendLine();
+                continue;
+            }
+
+            buffer.AppendLine(":");
+            AppendYamlValue(buffer, property.Value, indent + 2);
+        }
+    }
+
+    private static void AppendYamlArray(StringBuilder buffer, JsonElement value, int indent)
+    {
+        var items = value.EnumerateArray().ToList();
+        if (items.Count == 0)
+        {
+            AppendIndent(buffer, indent);
+            buffer.AppendLine("[]");
+            return;
+        }
+
+        foreach (var item in items)
+        {
+            AppendIndent(buffer, indent);
+            if (TryAppendYamlInlineSequenceItem(buffer, item, indent + 2))
+            {
+                buffer.AppendLine();
+                continue;
+            }
+
+            buffer.AppendLine("-");
+            AppendYamlValue(buffer, item, indent + 2);
+        }
+    }
+
+    private static bool TryAppendYamlInlineValue(StringBuilder buffer, JsonElement value, int childIndent)
+    {
+        if (TryAppendYamlInlineEmptyMappingValue(buffer, value))
+        {
+            return true;
+        }
+
+        if (value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        buffer.Append(": ");
+        AppendYamlScalar(buffer, value, childIndent);
+        return true;
+    }
+
+    private static bool TryAppendYamlInlineSequenceItem(StringBuilder buffer, JsonElement value, int childIndent)
+    {
+        if (TryAppendYamlInlineEmptySequenceItem(buffer, value))
+        {
+            return true;
+        }
+
+        if (value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        buffer.Append("- ");
+        AppendYamlScalar(buffer, value, childIndent);
+        return true;
+    }
+
+    private static bool TryAppendYamlInlineEmptyMappingValue(StringBuilder buffer, JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                if (!value.EnumerateObject().Any())
+                {
+                    buffer.Append(": {}");
+                    return true;
+                }
+
+                break;
+            case JsonValueKind.Array:
+                if (value.GetArrayLength() == 0)
+                {
+                    buffer.Append(": []");
+                    return true;
+                }
+
+                break;
+        }
+
+        return false;
+    }
+
+    private static bool TryAppendYamlInlineEmptySequenceItem(StringBuilder buffer, JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                if (!value.EnumerateObject().Any())
+                {
+                    buffer.Append("- {}");
+                    return true;
+                }
+
+                break;
+            case JsonValueKind.Array:
+                if (value.GetArrayLength() == 0)
+                {
+                    buffer.Append("- []");
+                    return true;
+                }
+
+                break;
+        }
+
+        return false;
+    }
+
+    private static void AppendYamlScalar(StringBuilder buffer, JsonElement value, int indent)
+    {
+        if (value.ValueKind == JsonValueKind.String &&
+            value.GetString() is string text &&
+            (text.Contains('\r') || text.Contains('\n')))
+        {
+            buffer.AppendLine("|-");
+            AppendYamlBlockString(buffer, text, indent);
+            return;
+        }
+
+        AppendYamlInlineScalar(buffer, value);
+    }
+
+    private static void AppendYamlInlineScalar(StringBuilder buffer, JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.String:
+                buffer.Append(EscapeYamlString(value.GetString() ?? string.Empty));
+                break;
+            case JsonValueKind.Number:
+                buffer.Append(value.GetRawText());
+                break;
+            case JsonValueKind.True:
+                buffer.Append("true");
+                break;
+            case JsonValueKind.False:
+                buffer.Append("false");
+                break;
+            case JsonValueKind.Null:
+            case JsonValueKind.Undefined:
+                buffer.Append("null");
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported YAML scalar kind '{value.ValueKind}'.");
+        }
+    }
+
+    private static void AppendYamlBlockString(StringBuilder buffer, string value, int indent)
+    {
+        var lines = value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
+        foreach (var line in lines)
+        {
+            AppendIndent(buffer, indent);
+            buffer.AppendLine(line);
+        }
+    }
+
+    private static void AppendIndent(StringBuilder buffer, int indent)
+    {
+        buffer.Append(' ', indent);
+    }
+
+    private static string EscapeYamlKey(string value)
+    {
+        return IsSafeYamlToken(value)
+            ? value
+            : EscapeYamlString(value);
+    }
+
+    private static string EscapeYamlString(string value)
+    {
+        return $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+    }
+
+    private static bool IsSafeYamlToken(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return false;
+        }
+
+        foreach (var character in value)
+        {
+            if (char.IsLetterOrDigit(character) || character is '-' or '_' or '.')
+            {
+                continue;
+            }
+
+            return false;
+        }
+
+        return true;
     }
 
     private static string BuildHumanTextOutput(CliOutput output, int? availableWidth)

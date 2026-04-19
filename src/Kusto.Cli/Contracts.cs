@@ -139,5 +139,6 @@ public enum OutputFormat
     Human,
     Json,
     Markdown,
+    Yaml,
     Csv
 }

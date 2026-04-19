@@ -39,6 +39,28 @@ public sealed class QueryCommandTests
     }
 
     [Fact]
+    public async Task Query_WithYamlFormatAndChart_ReturnsError()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var originalError = Console.Error;
+        using var errorWriter = new StringWriter();
+        Console.SetError(errorWriter);
+
+        try
+        {
+            var exitCode = await rootCommand.Parse(["--format", "yaml", "query", "print 1", "--chart"], new ParserConfiguration())
+                .InvokeAsync();
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("--chart can't be used with --format yaml.", errorWriter.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+    }
+
+    [Fact]
     public async Task Query_WithCsvFormatAndShowStats_ReturnsError()
     {
         var rootCommand = CommandFactory.CreateRootCommand();

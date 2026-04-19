@@ -21,6 +21,14 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_AllowsYamlAlias()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["cluster", "list", "--format", "yml"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
     public void Parse_RejectsUnknownFormat()
     {
         var rootCommand = CommandFactory.CreateRootCommand();

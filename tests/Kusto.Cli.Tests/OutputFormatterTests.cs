@@ -100,6 +100,55 @@ public sealed class OutputFormatterTests
     }
 
     [Fact]
+    public void FormatYaml_QueryOutput_UsesStructuredCamelCaseOutput()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Message = "hello",
+            Table = new TabularData(["Name"], [["alpha"]]),
+            WebExplorerUrl = "https://dataexplorer.azure.com/",
+            Statistics = new QueryStatistics
+            {
+                ExecutionTimeSec = 1.23
+            }
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Yaml);
+
+        Assert.Contains("message: 'hello'", rendered, StringComparison.Ordinal);
+        Assert.Contains("webExplorerUrl: 'https://dataexplorer.azure.com/'", rendered, StringComparison.Ordinal);
+        Assert.Contains("statistics:", rendered, StringComparison.Ordinal);
+        Assert.Contains("executionTimeSec: 1.23", rendered, StringComparison.Ordinal);
+        Assert.Contains("table:", rendered, StringComparison.Ordinal);
+        Assert.Contains("columns:", rendered, StringComparison.Ordinal);
+        Assert.Contains("- 'Name'", rendered, StringComparison.Ordinal);
+        Assert.Contains("rows:", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("chartHint", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatYaml_MultilineString_UsesBlockScalar()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Message = $"line1{Environment.NewLine}line2"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Yaml);
+        var expected = string.Join(
+            Environment.NewLine,
+            [
+                "message: |-",
+                "  line1",
+                "  line2"
+            ]);
+
+        Assert.Equal(expected, rendered);
+    }
+
+    [Fact]
     public void FormatCsv_TableOutput_UsesHeadersAndRows()
     {
         var formatter = new OutputFormatter();

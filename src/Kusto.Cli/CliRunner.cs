@@ -8,7 +8,8 @@ public static class CliRunner
     [
         OutputFormat.Human,
         OutputFormat.Json,
-        OutputFormat.Markdown
+        OutputFormat.Markdown,
+        OutputFormat.Yaml
     ];
 
     private static readonly OutputFormat[] RecognizedFormats =
@@ -16,6 +17,7 @@ public static class CliRunner
         OutputFormat.Human,
         OutputFormat.Json,
         OutputFormat.Markdown,
+        OutputFormat.Yaml,
         OutputFormat.Csv
     ];
 
@@ -80,6 +82,8 @@ public static class CliRunner
             "json" => OutputFormat.Json,
             "markdown" => OutputFormat.Markdown,
             "md" => OutputFormat.Markdown,
+            "yaml" => OutputFormat.Yaml,
+            "yml" => OutputFormat.Yaml,
             "csv" => OutputFormat.Csv,
             _ => throw new UserFacingException(
                 $"'{formatToken}' is not a valid output format. Use one of: {DescribeOutputFormats(RecognizedFormats)}.")
@@ -168,6 +172,12 @@ public static class CliRunner
         {
             tokens.Add("markdown");
             tokens.Add("md");
+        }
+
+        if (uniqueFormats.Contains(OutputFormat.Yaml))
+        {
+            tokens.Add("yaml");
+            tokens.Add("yml");
         }
 
         if (uniqueFormats.Contains(OutputFormat.Csv))
