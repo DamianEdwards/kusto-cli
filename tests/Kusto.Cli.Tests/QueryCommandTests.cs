@@ -16,8 +16,10 @@ public sealed class QueryCommandTests
         Assert.Equal(1, exitCode);
     }
 
-    [Fact]
-    public async Task Query_WithCsvFormatAndChart_ReturnsError()
+    [Theory]
+    [InlineData("csv")]
+    [InlineData("tsv")]
+    public async Task Query_WithTabularFormatAndChart_ReturnsError(string format)
     {
         var rootCommand = CommandFactory.CreateRootCommand();
         var originalError = Console.Error;
@@ -26,11 +28,11 @@ public sealed class QueryCommandTests
 
         try
         {
-            var exitCode = await rootCommand.Parse(["--format", "csv", "query", "print 1", "--chart"], new ParserConfiguration())
+            var exitCode = await rootCommand.Parse(["--format", format, "query", "print 1", "--chart"], new ParserConfiguration())
                 .InvokeAsync();
 
             Assert.Equal(1, exitCode);
-            Assert.Contains("--chart can't be used with --format csv.", errorWriter.ToString(), StringComparison.Ordinal);
+            Assert.Contains($"--chart can't be used with --format {format}.", errorWriter.ToString(), StringComparison.Ordinal);
         }
         finally
         {
@@ -38,8 +40,10 @@ public sealed class QueryCommandTests
         }
     }
 
-    [Fact]
-    public async Task Query_WithCsvFormatAndShowStats_ReturnsError()
+    [Theory]
+    [InlineData("csv")]
+    [InlineData("tsv")]
+    public async Task Query_WithTabularFormatAndShowStats_ReturnsError(string format)
     {
         var rootCommand = CommandFactory.CreateRootCommand();
         var originalError = Console.Error;
@@ -48,11 +52,11 @@ public sealed class QueryCommandTests
 
         try
         {
-            var exitCode = await rootCommand.Parse(["--format", "csv", "query", "print 1", "--show-stats"], new ParserConfiguration())
+            var exitCode = await rootCommand.Parse(["--format", format, "query", "print 1", "--show-stats"], new ParserConfiguration())
                 .InvokeAsync();
 
             Assert.Equal(1, exitCode);
-            Assert.Contains("--show-stats can't be used with --format csv.", errorWriter.ToString(), StringComparison.Ordinal);
+            Assert.Contains($"--show-stats can't be used with --format {format}.", errorWriter.ToString(), StringComparison.Ordinal);
         }
         finally
         {
@@ -60,8 +64,10 @@ public sealed class QueryCommandTests
         }
     }
 
-    [Fact]
-    public async Task ClusterList_WithCsvFormat_ReturnsError()
+    [Theory]
+    [InlineData("csv")]
+    [InlineData("tsv")]
+    public async Task ClusterList_WithTabularFormat_ReturnsError(string format)
     {
         var rootCommand = CommandFactory.CreateRootCommand();
         var originalError = Console.Error;
@@ -70,11 +76,11 @@ public sealed class QueryCommandTests
 
         try
         {
-            var exitCode = await rootCommand.Parse(["cluster", "list", "--format", "csv"], new ParserConfiguration())
+            var exitCode = await rootCommand.Parse(["cluster", "list", "--format", format], new ParserConfiguration())
                 .InvokeAsync();
 
             Assert.Equal(1, exitCode);
-            Assert.Contains("'csv' is not supported for this command.", errorWriter.ToString(), StringComparison.Ordinal);
+            Assert.Contains($"'{format}' is not supported for this command.", errorWriter.ToString(), StringComparison.Ordinal);
         }
         finally
         {

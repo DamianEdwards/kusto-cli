@@ -26,7 +26,7 @@ Grab the relevant executable asset from the latest [release](https://github.com/
 - Render compatible `render` results as terminal charts with `--chart`, or as Mermaid in markdown output
 - Show optional query execution statistics with `--show-stats`
 - Basic public, US Government, and China cloud support for token audience selection and Web Explorer links
-- Multiple output formats (`human`, `json`, `markdown`/`md`, plus query-only `csv`)
+- Multiple output formats (`human`, `json`, `markdown`/`md`, plus query-only `csv` and `tsv`)
 - Optional offline table data with TTL-based schema revalidation, per-table notes, and import/export support
 - Configurable log verbosity with structured console/file logging
 - GitHub Actions workflows for PR validation, versioned native release assets, and release promotion
@@ -66,6 +66,9 @@ kusto query --format markdown --chart "StormEvents | summarize Count=count() by 
 # Redirect query results directly to CSV
 kusto query "StormEvents | summarize EventCount = count() by State | top 10 by EventCount desc" --format csv > top-states.csv
 
+# Or use TSV for tab-delimited export
+kusto query "StormEvents | summarize EventCount = count() by State | top 10 by EventCount desc" --format tsv > top-states.tsv
+
 # Need copy/paste examples?
 kusto examples
 ```
@@ -89,7 +92,7 @@ $env:KUSTO_CONFIG_PATH = "C:\temp\kusto\config.json"
 
 - `human`: renders compatible chart types directly in the terminal after the tabular results
 - `markdown`: emits Mermaid chart syntax for compatible chart kinds after the markdown table
-- `json` / `csv`: rejected, because terminal/markdown chart rendering doesn't apply to JSON or CSV output
+- `json` / `csv` / `tsv`: rejected, because terminal/markdown chart rendering doesn't apply to JSON or tabular export output
 
 Supported render kinds:
 
@@ -214,7 +217,7 @@ These options are available on all commands:
 
 | Option | Values | Default | Description |
 |---|---|---|---|
-| `--format` | `human`, `json`, `markdown`, `md`, `csv` | `human` | Output format. `csv` is currently supported only for `query`. |
+| `--format` | `human`, `json`, `markdown`, `md`, `csv`, `tsv` | `human` | Output format. `csv` and `tsv` are currently supported only for `query`. |
 | `--log-level` | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, `None` | not set | Enables console logging at the selected level (logs are always written to file). |
 | `-h`, `--help` | n/a | n/a | Show help. |
 | `--version` | n/a | n/a | Show version. |
