@@ -21,6 +21,14 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_AllowsTsvFormat()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var result = rootCommand.Parse(["query", "print 1", "--format", "tsv"], new ParserConfiguration());
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
     public void Parse_RejectsUnknownFormat()
     {
         var rootCommand = CommandFactory.CreateRootCommand();
