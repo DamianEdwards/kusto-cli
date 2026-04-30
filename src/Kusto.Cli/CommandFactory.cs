@@ -812,6 +812,20 @@ public static class CommandFactory
         {
             Description = "Render compatible query charts in the terminal for human output or as Mermaid for markdown output."
         };
+        var outputChartOption = new Option<string?>("--output-chart")
+        {
+            Description = "Write the rendered chart to a PNG file at the given path. Works with any --format. Suppresses raw data output."
+        };
+        var outputChartWidthOption = new Option<int>("--output-chart-width")
+        {
+            Description = $"PNG width in pixels for --output-chart (default {ChartStyle.DefaultWidth}, range {ChartStyle.MinDimension}..{ChartStyle.MaxDimension}).",
+            DefaultValueFactory = _ => ChartStyle.DefaultWidth
+        };
+        var outputChartHeightOption = new Option<int>("--output-chart-height")
+        {
+            Description = $"PNG height in pixels for --output-chart (default {ChartStyle.DefaultHeight}, range {ChartStyle.MinDimension}..{ChartStyle.MaxDimension}).",
+            DefaultValueFactory = _ => ChartStyle.DefaultHeight
+        };
 
         queryCommand.Add(queryArgument);
         queryCommand.Add(queryFileOption);
@@ -819,6 +833,9 @@ public static class CommandFactory
         queryCommand.Add(databaseOption);
         queryCommand.Add(showStatsOption);
         queryCommand.Add(chartOption);
+        queryCommand.Add(outputChartOption);
+        queryCommand.Add(outputChartWidthOption);
+        queryCommand.Add(outputChartHeightOption);
         queryCommand.SetAction((parseResult, cancellationToken) =>
         {
             var queryText = parseResult.GetValue(queryArgument);
@@ -827,6 +844,11 @@ public static class CommandFactory
             var databaseName = parseResult.GetValue(databaseOption);
             var showStats = parseResult.GetValue(showStatsOption);
             var showChart = parseResult.GetValue(chartOption);
+            var chartOutputPath = parseResult.GetValue(outputChartOption);
+            var chartWidth = parseResult.GetValue(outputChartWidthOption);
+            var chartHeight = parseResult.GetValue(outputChartHeightOption);
+            var chartWidthSpecified = parseResult.GetResult(outputChartWidthOption) is { Implicit: false };
+            var chartHeightSpecified = parseResult.GetResult(outputChartHeightOption) is { Implicit: false };
             var format = parseResult.GetRequiredValue(formatOption);
             var logLevel = parseResult.GetValue(logLevelOption);
 
@@ -844,6 +866,11 @@ public static class CommandFactory
                 if (showStats && isCsvOutput)
                 {
                     throw new UserFacingException("--show-stats can't be used with --format csv.");
+                }
+
+                if (string.IsNullOrEmpty(chartOutputPath) && (chartWidthSpecified || chartHeightSpecified))
+                {
+                    throw new UserFacingException("--output-chart-width and --output-chart-height require --output-chart.");
                 }
 
                 var config = await runtime.ConfigStore.LoadAsync(ct);
@@ -869,6 +896,7 @@ public static class CommandFactory
                 string? humanChart = null;
                 string? humanChartAnsi = null;
                 string? markdownChart = null;
+                string? chartOutputWritten = null;
                 if (result.Visualization is not null)
                 {
                     var compatibility = KustoChartCompatibilityAnalyzer.Analyze(result.Table, result.Visualization);
@@ -899,15 +927,39 @@ public static class CommandFactory
                             }
                         }
                     }
-                    else if (!isMarkdownOutput && !isCsvOutput && compatibility.HumanChart is not null)
+                    else if (!isMarkdownOutput && !isCsvOutput && compatibility.HumanChart is not null && string.IsNullOrEmpty(chartOutputPath))
                     {
                         chartHint = "This query can be rendered as a terminal chart. Re-run with --chart to see it.";
                     }
+
+                    if (!string.IsNullOrEmpty(chartOutputPath))
+                    {
+                        if (compatibility.HumanChart is null)
+                        {
+                            throw new UserFacingException(compatibility.HumanReason ?? "This query's render kind isn't supported for image output.");
+                        }
+
+                        chartOutputWritten = await ChartImageWriter.WritePngAsync(
+                            compatibility.HumanChart,
+                            chartOutputPath!,
+                            chartWidth,
+                            chartHeight,
+                            ct);
+
+                        if (isCsvOutput)
+                        {
+                            Console.Error.WriteLine($"Chart written to {chartOutputWritten}");
+                        }
+                    }
+                }
+                else if (!string.IsNullOrEmpty(chartOutputPath))
+                {
+                    throw new UserFacingException("--output-chart requires the query to include a 'render' annotation.");
                 }
 
                 return new CliOutput
                 {
-                    Table = result.Table,
+                    Table = string.IsNullOrEmpty(chartOutputPath) ? result.Table : null,
                     WebExplorerUrl = result.WebExplorerUrl,
                     Statistics = result.Statistics,
                     Visualization = result.Visualization,
@@ -916,6 +968,7 @@ public static class CommandFactory
                     HumanChart = humanChart,
                     HumanChartAnsi = humanChartAnsi,
                     MarkdownChart = markdownChart,
+                    ChartOutputPath = chartOutputWritten,
                     IsQueryResultTable = true
                 };
             }, cancellationToken, OutputFormat.Human, OutputFormat.Json, OutputFormat.Markdown, OutputFormat.Csv);
@@ -1036,3 +1089,5 @@ public static class CommandFactory
         }
     }
 }
+
+

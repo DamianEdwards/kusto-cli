@@ -283,6 +283,51 @@ public sealed class OutputFormatterTests
     }
 
     [Fact]
+    public void FormatHuman_QueryOutput_WithChartOutputPath_AppendsConfirmation()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(["State", "Count"], [["TEXAS", "60"]]),
+            ChartOutputPath = "/tmp/chart.png"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Human);
+
+        Assert.Contains("Chart written to /tmp/chart.png", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatMarkdown_QueryOutput_WithChartOutputPath_AppendsConfirmation()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(["State", "Count"], [["TEXAS", "60"]]),
+            ChartOutputPath = "/tmp/chart.png"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Markdown);
+
+        Assert.Contains("Chart written to /tmp/chart.png", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatJson_QueryOutput_WithChartOutputPath_IncludesField()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            ChartOutputPath = "/tmp/chart.png"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Json);
+
+        Assert.Contains("\"chartOutputPath\"", rendered, StringComparison.Ordinal);
+        Assert.Contains("/tmp/chart.png", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FormatHuman_QueryOutput_WithAnsiHumanChart_FallsBackToPlainChartWhenAnsiIsUnavailable()
     {
         var formatter = new OutputFormatter();

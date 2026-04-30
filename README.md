@@ -23,7 +23,7 @@ Grab the relevant executable asset from the latest [release](https://github.com/
 - Show copy/paste-ready examples and aliases (`examples`)
 - Include Azure Data Explorer Web Explorer deeplinks in query results
 - Surface Kusto `render` metadata in query results when visualization annotations are returned
-- Render compatible `render` results as terminal charts with `--chart`, or as Mermaid in markdown output
+- Render compatible `render` results as terminal charts with `--chart`, as Mermaid in markdown output, or as PNG images via `--output-chart`
 - Show optional query execution statistics with `--show-stats`
 - Basic public, US Government, and China cloud support for token audience selection and Web Explorer links
 - Multiple output formats (`human`, `json`, `markdown`/`md`, plus query-only `csv`)
@@ -60,6 +60,9 @@ kusto query "StormEvents | take 5"
 # Render a compatible chart directly in the terminal
 kusto query --chart "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart"
 
+# Save the chart as a PNG image
+kusto query --output-chart ./top-states.png "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart"
+
 # Emit Mermaid markdown for a compatible render query
 kusto query --format markdown --chart "StormEvents | summarize Count=count() by State | top 5 by Count desc | render piechart"
 
@@ -93,19 +96,48 @@ $env:KUSTO_CONFIG_PATH = "C:\temp\kusto\config.json"
 
 Supported render kinds:
 
-| Kusto `render` kind | `human --chart` | `markdown --chart` | Notes |
-|---|---|---|---|
-| `columnchart` | yes | yes | Human output renders a terminal column chart; markdown emits Mermaid `xychart`. |
-| `barchart` | yes | yes | Human output renders a terminal bar chart; markdown emits Mermaid `xychart horizontal`. |
-| `linechart` | yes | yes | Human output renders a terminal line chart; markdown emits Mermaid `xychart`. |
-| `timechart` | yes | yes | Alias of `linechart`. |
-| `piechart` | yes | yes | Human output renders a terminal pie chart with a legend; markdown emits Mermaid `pie`. |
+| Kusto `render` kind | `human --chart` | `markdown --chart` | `--output-chart` (PNG) | Notes |
+|---|---|---|---|---|
+| `columnchart` | yes | yes | yes | Human output renders a terminal column chart; markdown emits Mermaid `xychart`; PNG draws via ScottPlot. |
+| `barchart` | yes | yes | yes | Human output renders a terminal bar chart; markdown emits Mermaid `xychart horizontal`; PNG draws via ScottPlot. |
+| `linechart` | yes | yes | yes | Human output renders a terminal line chart; markdown emits Mermaid `xychart`; PNG draws via ScottPlot. |
+| `timechart` | yes | yes | yes | Alias of `linechart`. |
+| `piechart` | yes | yes | yes | Human output renders a terminal pie chart with a legend; markdown emits Mermaid `pie`; PNG draws a pie with a value/percentage legend. |
 
 Layout support:
 
-- `linechart` and `timechart` support `default`/`unstacked`, `stacked`, and `stacked100` for terminal rendering
-- `columnchart` and `barchart` support `default`/`unstacked`, `grouped`, `stacked`, and `stacked100` for terminal rendering
+- `linechart` and `timechart` support `default`/`unstacked`, `stacked`, and `stacked100` for terminal and PNG rendering
+- `columnchart` and `barchart` support `default`/`unstacked`, `grouped`, `stacked`, and `stacked100` for terminal and PNG rendering
 - Mermaid cartesian output currently requires the simple/default layout and exactly one series
+
+### Image output (PNG)
+
+`--output-chart <path.png>` writes the rendered chart to a PNG file using [ScottPlot](https://scottplot.net/) (Apache 2.0, headless SkiaSharp backend). It is orthogonal to `--chart`: the file is always written when supplied and works alongside any `--format`, including `json` and `csv`. Raw tabular data is suppressed from output when `--output-chart` is set — only the chart path confirmation line (and any stats/visualization metadata) is emitted. Use it when you want a chart that's readable by image viewers, embeddable in docs, or consumable by multimodal LLMs.
+
+```powershell
+# Save a PNG alongside human terminal output
+kusto query --chart --output-chart ./top-states.png "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart"
+
+# Save a PNG while emitting CSV to stdout
+kusto query --format csv --output-chart ./top-states.png "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart" > top-states.csv
+
+# Custom dimensions
+kusto query --output-chart ./pie.png --output-chart-width 1600 --output-chart-height 900 "StormEvents | summarize Count=count() by State | top 5 by Count desc | render piechart"
+```
+
+Image-output options:
+
+| Option | Default | Notes |
+|---|---|---|
+| `--output-chart <path>` | _(off)_ | Path must end in `.png`. Parent directories are created if missing. |
+| `--output-chart-width <pixels>` | `1200` | Range 200..8192. Requires `--output-chart`. |
+| `--output-chart-height <pixels>` | `675` | Range 200..8192. Requires `--output-chart`. |
+
+Behavior notes:
+
+- The image renderer consumes the same compatibility analysis as the terminal renderer, so any chart kind/layout that renders in the terminal will render to PNG.
+- The PNG palette is a neutral, high-contrast set (white background, dark axes/text, saturated, well-separated series colors) chosen for legibility under OCR and multimodal LLM ingestion rather than to match the Hex1b terminal palette pixel-for-pixel.
+- If the query has no `render` annotation or the kind is unsupported, `--output-chart` fails with the same reason `--chart` would have surfaced.
 
 Example terminal renderings captured as plain text:
 
@@ -236,7 +268,7 @@ These options are available on all commands:
 | `table list` | List tables in a database. | none | `--cluster`, `--database`, `--filter`, `--take`, global options |
 | `table show <table>` | Show table details, column schema, docstrings, and stored notes. | `table` | `--cluster`, `--database`, `--refresh-offline-data`, global options |
 | `table notes [<table>]` | List, add, delete, or clear table notes. | optional `table` | `--cluster`, `--database`, `--add`, `--id`, `--delete`, `--clear`, `--force`, global options |
-| `query [<query>]` | Run KQL from inline text, file, or stdin. | optional `query` | `--file`, `--cluster`, `--database`, `--chart`, `--show-stats`, global options |
+| `query [<query>]` | Run KQL from inline text, file, or stdin. | optional `query` | `--file`, `--cluster`, `--database`, `--chart`, `--output-chart`, `--output-chart-width`, `--output-chart-height`, `--show-stats`, global options |
 
 ## Command-specific option details
 
@@ -259,6 +291,9 @@ These options are available on all commands:
 | `--use` | `cluster add` | Also set the added cluster as the active/default cluster. |
 | `--file <path>` | `query` | Read query text from file. Append `:<start>-<end>` to read an inclusive 1-based line range. Alias: `-f`. Cannot be combined with inline query argument. |
 | `--chart` | `query` | Render compatible query results as a chart for `human` or `markdown` output. Not supported with `json` or `csv`. |
+| `--output-chart <path>` | `query` | Write the rendered chart as a PNG to the given path. Works with any `--format`, including `json` and `csv`. Suppresses raw data output. Path must end in `.png`. Parent directories are created automatically. |
+| `--output-chart-width <pixels>` | `query` | PNG width in pixels for `--output-chart`. Default: `1200`. Range: 200–8192. Requires `--output-chart`. |
+| `--output-chart-height <pixels>` | `query` | PNG height in pixels for `--output-chart`. Default: `675`. Range: 200–8192. Requires `--output-chart`. |
 | `--show-stats` | `query` | Include query execution statistics when Kusto returns them. Not supported with `csv`. |
 
 ## Optional aliases
@@ -389,6 +424,21 @@ kusto query "StormEvents | summarize Count=count() by bin(StartTime, 1d) | rende
 
 # Emit Mermaid pie chart output in markdown
 kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render piechart" --cluster help --database Samples --format markdown --chart
+
+# Save a column chart as a PNG (default 1200×675)
+kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart" --cluster help --database Samples --output-chart ./top-states.png
+
+# Save a PNG and render in the terminal at the same time
+kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart" --cluster help --database Samples --chart --output-chart ./top-states.png
+
+# Save a PNG at a custom size
+kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render piechart" --cluster help --database Samples --output-chart ./pie.png --output-chart-width 1600 --output-chart-height 900
+
+# Save a PNG while still streaming results as CSV
+kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart" --cluster help --database Samples --format csv --output-chart ./top-states.png > top-states.csv
+
+# Save a PNG while capturing results as JSON (chartOutputPath appears in the envelope)
+kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart" --cluster help --database Samples --format json --output-chart ./top-states.png
 ```
 
 ## Output formats
@@ -605,3 +655,4 @@ dotnet publish ./src/Kusto.Cli/ --os linux [--arch <arch>]
 ## License
 
 MIT
+

@@ -37,6 +37,11 @@ public sealed class OutputFormatter : IOutputFormatter
             sections.Add(selectedChart);
         }
 
+        if (!string.IsNullOrWhiteSpace(output.ChartOutputPath))
+        {
+            sections.Add($"Chart written to {output.ChartOutputPath}");
+        }
+
         if (!string.IsNullOrWhiteSpace(output.WebExplorerUrl))
         {
             sections.Add(Hex1bHumanRenderer.RenderHyperlink("Open in Web Explorer", output.WebExplorerUrl, useAnsi));
@@ -106,6 +111,16 @@ public sealed class OutputFormatter : IOutputFormatter
             }
 
             buffer.AppendLine(output.MarkdownChart);
+        }
+
+        if (!string.IsNullOrWhiteSpace(output.ChartOutputPath))
+        {
+            if (buffer.Length > 0)
+            {
+                buffer.AppendLine();
+            }
+
+            buffer.AppendLine($"Chart written to {output.ChartOutputPath}");
         }
 
         if (!string.IsNullOrWhiteSpace(output.WebExplorerUrl))
