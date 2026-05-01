@@ -28,9 +28,70 @@ public static class CommandFactory
             BuildClusterCommand(formatOption, logLevelOption),
             BuildDatabaseCommand(formatOption, logLevelOption),
             BuildTableCommand(formatOption, logLevelOption),
-            BuildQueryCommand(formatOption, logLevelOption)
+            BuildQueryCommand(formatOption, logLevelOption),
+            BuildDiagnosticsCommand()
         };
         return root;
+    }
+
+    private static Command BuildDiagnosticsCommand()
+    {
+        // Hidden top-level command for packaging/runtime smoke tests. The first
+        // subcommand exists so CI can verify that the released archive can load
+        // SkiaSharp/HarfBuzz native sidecars and produce a real PNG without
+        // requiring authenticated access to a Kusto cluster.
+        var diagCommand = new Command("_diag", "Diagnostic commands for packaging/runtime smoke tests.")
+        {
+            Hidden = true
+        };
+
+        var chartSelfTest = new Command("chart-self-test", "Render a fixed sample chart to a PNG path. Used to verify native chart-rendering dependencies on a fresh install.")
+        {
+            Hidden = true
+        };
+
+        var outputOption = new Option<string>("--output")
+        {
+            Description = "Path to the PNG file to write.",
+            Required = true
+        };
+
+        chartSelfTest.Add(outputOption);
+        chartSelfTest.SetAction(async (parseResult, cancellationToken) =>
+        {
+            var output = parseResult.GetRequiredValue(outputOption);
+
+            var chart = new QueryChartDefinition
+            {
+                Kind = QueryChartKind.Column,
+                Title = "kusto chart self-test",
+                XTitle = "category",
+                YTitle = "value",
+                Categories = ["alpha", "beta", "gamma", "delta"],
+                Series = [new QueryChartSeries("sample", [10, 25, 15, 40])]
+            };
+
+            try
+            {
+                var written = await ChartImageWriter.WritePngAsync(
+                    chart,
+                    output,
+                    ChartStyle.DefaultWidth,
+                    ChartStyle.DefaultHeight,
+                    cancellationToken);
+
+                Console.Out.WriteLine($"Chart self-test written to {written}");
+                return 0;
+            }
+            catch (UserFacingException ex)
+            {
+                Console.Error.WriteLine($"kusto: {ex.Message}");
+                return 1;
+            }
+        });
+
+        diagCommand.Add(chartSelfTest);
+        return diagCommand;
     }
 
     private static Command BuildExamplesCommand(Option<string> formatOption, Option<string?> logLevelOption)
@@ -814,7 +875,7 @@ public static class CommandFactory
         };
         var outputChartOption = new Option<string?>("--output-chart")
         {
-            Description = "Write the rendered chart to a PNG file at the given path. Works with any --format. Suppresses raw data output."
+            Description = "Write the rendered chart to a PNG file at the given path. Works with any --format. For human/markdown/json suppresses raw data on stdout and emits a chart-written confirmation. For csv keeps the CSV on stdout and writes the confirmation to stderr."
         };
         var outputChartWidthOption = new Option<int>("--output-chart-width")
         {
@@ -946,6 +1007,10 @@ public static class CommandFactory
                             chartHeight,
                             ct);
 
+                        // CSV output is a pure data stream meant for redirection (e.g. `> data.csv`).
+                        // Surface the chart confirmation on stderr only so it doesn't pollute the
+                        // CSV stream. For human/markdown/json the confirmation flows through
+                        // CliOutput.ChartOutputPath via the formatter.
                         if (isCsvOutput)
                         {
                             Console.Error.WriteLine($"Chart written to {chartOutputWritten}");
@@ -957,9 +1022,15 @@ public static class CommandFactory
                     throw new UserFacingException("--output-chart requires the query to include a 'render' annotation.");
                 }
 
+                // When --output-chart writes a PNG, suppress the tabular data from stdout for
+                // display formats (human/markdown/json) — the chart already conveys it. Keep
+                // the table for CSV so `--format csv --output-chart x.png > data.csv` produces
+                // both the PNG (side effect) and the CSV stream (stdout). The chart-written
+                // confirmation goes to stderr in that case (see above).
+                var suppressTable = !string.IsNullOrEmpty(chartOutputPath) && !isCsvOutput;
                 return new CliOutput
                 {
-                    Table = string.IsNullOrEmpty(chartOutputPath) ? result.Table : null,
+                    Table = suppressTable ? null : result.Table,
                     WebExplorerUrl = result.WebExplorerUrl,
                     Statistics = result.Statistics,
                     Visualization = result.Visualization,

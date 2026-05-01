@@ -112,7 +112,9 @@ Layout support:
 
 ### Image output (PNG)
 
-`--output-chart <path.png>` writes the rendered chart to a PNG file using [ScottPlot](https://scottplot.net/) (Apache 2.0, headless SkiaSharp backend). It is orthogonal to `--chart`: the file is always written when supplied and works alongside any `--format`, including `json` and `csv`. Raw tabular data is suppressed from output when `--output-chart` is set — only the chart path confirmation line (and any stats/visualization metadata) is emitted. Use it when you want a chart that's readable by image viewers, embeddable in docs, or consumable by multimodal LLMs.
+`--output-chart <path.png>` writes the rendered chart to a PNG file using [ScottPlot](https://scottplot.net/) (MIT, headless SkiaSharp backend). It is orthogonal to `--chart`: the file is always written when supplied and works alongside any `--format`, including `json` and `csv`. For display formats (`human`, `markdown`, `json`) the raw tabular data is suppressed and only a chart-written confirmation (plus any stats/visualization metadata) is emitted. For `--format csv` the CSV stream is preserved on stdout so `... --format csv --output-chart x.png > data.csv` writes both the PNG (as a side effect) and the CSV data; the chart-written confirmation goes to stderr in that case. Use it when you want a chart that's readable by image viewers, embeddable in docs, or consumable by multimodal LLMs.
+
+Third-party licenses for the rendering stack are summarized in [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md).
 
 ```powershell
 # Save a PNG alongside human terminal output
@@ -291,7 +293,7 @@ These options are available on all commands:
 | `--use` | `cluster add` | Also set the added cluster as the active/default cluster. |
 | `--file <path>` | `query` | Read query text from file. Append `:<start>-<end>` to read an inclusive 1-based line range. Alias: `-f`. Cannot be combined with inline query argument. |
 | `--chart` | `query` | Render compatible query results as a chart for `human` or `markdown` output. Not supported with `json` or `csv`. |
-| `--output-chart <path>` | `query` | Write the rendered chart as a PNG to the given path. Works with any `--format`, including `json` and `csv`. Suppresses raw data output. Path must end in `.png`. Parent directories are created automatically. |
+| `--output-chart <path>` | `query` | Write the rendered chart as a PNG to the given path. Works with any `--format`. For `human`/`markdown`/`json` the raw tabular data is suppressed and a chart-written confirmation is emitted on stdout. For `csv` the CSV stream stays on stdout and the chart-written confirmation goes to stderr. Path must end in `.png`. Parent directories are created automatically. |
 | `--output-chart-width <pixels>` | `query` | PNG width in pixels for `--output-chart`. Default: `1200`. Range: 200–8192. Requires `--output-chart`. |
 | `--output-chart-height <pixels>` | `query` | PNG height in pixels for `--output-chart`. Default: `675`. Range: 200–8192. Requires `--output-chart`. |
 | `--show-stats` | `query` | Include query execution statistics when Kusto returns them. Not supported with `csv`. |
