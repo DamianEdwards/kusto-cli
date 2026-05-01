@@ -283,6 +283,73 @@ public sealed class OutputFormatterTests
     }
 
     [Fact]
+    public void FormatHuman_QueryOutput_WithChartOutputPath_AppendsConfirmation()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(["State", "Count"], [["TEXAS", "60"]]),
+            ChartOutputPath = "/tmp/chart.png"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Human);
+
+        Assert.Contains("Chart written to /tmp/chart.png", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatMarkdown_QueryOutput_WithChartOutputPath_AppendsConfirmation()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(["State", "Count"], [["TEXAS", "60"]]),
+            ChartOutputPath = "/tmp/chart.png"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Markdown);
+
+        Assert.Contains("Chart written to /tmp/chart.png", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatJson_QueryOutput_WithChartOutputPath_IncludesField()
+    {
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            ChartOutputPath = "/tmp/chart.png"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Json);
+
+        Assert.Contains("\"chartOutputPath\"", rendered, StringComparison.Ordinal);
+        Assert.Contains("/tmp/chart.png", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatCsv_WithChartOutputPath_PreservesTableOnStdout()
+    {
+        // CSV output is a data stream meant for redirection. The chart confirmation
+        // travels via stderr (handled by the command handler), not the formatter,
+        // so the formatter's CSV output for CSV+chart should look identical to plain CSV.
+        var formatter = new OutputFormatter();
+        var output = new CliOutput
+        {
+            Table = new TabularData(["State", "Count"], [["TEXAS", "60"], ["KANSAS", "40"]]),
+            ChartOutputPath = "/tmp/chart.png"
+        };
+
+        var rendered = formatter.Format(output, OutputFormat.Csv);
+
+        Assert.Contains("State,Count", rendered, StringComparison.Ordinal);
+        Assert.Contains("TEXAS,60", rendered, StringComparison.Ordinal);
+        Assert.Contains("KANSAS,40", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("Chart written to", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("/tmp/chart.png", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FormatHuman_QueryOutput_WithAnsiHumanChart_FallsBackToPlainChartWhenAnsiIsUnavailable()
     {
         var formatter = new OutputFormatter();

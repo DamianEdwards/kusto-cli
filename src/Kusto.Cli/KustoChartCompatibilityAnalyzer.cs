@@ -112,7 +112,15 @@ internal static class KustoChartCompatibilityAnalyzer
         QueryChartKind kind,
         bool horizontal)
     {
-        var xColumn = ResolveColumnName(table, visualization.XColumn) ?? table.Columns.FirstOrDefault();
+        var xColumn = ResolveColumnName(table, visualization.XColumn);
+        if (xColumn == null)
+        {
+            // For timechart/linechart prefer a datetime column as X (the time bin is rarely first).
+            xColumn = kind == QueryChartKind.Line
+                ? FindDateTimeColumn(table) ?? table.Columns.FirstOrDefault()
+                : table.Columns.FirstOrDefault();
+        }
+
         if (string.IsNullOrWhiteSpace(xColumn))
         {
             return Unsupported(
@@ -121,6 +129,15 @@ internal static class KustoChartCompatibilityAnalyzer
         }
 
         var seriesColumns = ResolveSeriesColumns(table, visualization, xColumn);
+
+        // When Kusto returns long-format grouped data (e.g. summarize ... by DimCol, bin(time,5m))
+        // the Series field in the visualization may be unset. Auto-detect: any column that isn't
+        // the X column, isn't numeric and isn't a datetime is a series-split dimension.
+        if (seriesColumns.Count == 0)
+        {
+            seriesColumns = AutoDetectSeriesColumns(table, xColumn);
+        }
+
         var yColumns = ResolveYColumns(table, visualization, xColumn, seriesColumns);
         if (yColumns.Count == 0)
         {
@@ -153,6 +170,21 @@ internal static class KustoChartCompatibilityAnalyzer
             return Unsupported(cartesianResult.Reason, cartesianResult.Reason);
         }
 
+        DateTime[]? dateTimeCategories = null;
+        if (IsDateTimeColumn(table, xColumn) && cartesianResult.Categories is not null)
+        {
+            dateTimeCategories = ParseDateTimeCategories(cartesianResult.Categories);
+            if (dateTimeCategories is not null)
+            {
+                // Kusto may return rows in arbitrary order when grouping. Sort categories
+                // chronologically so lines connect adjacent time points instead of
+                // zig-zagging across the chart.
+                SortCategoriesChronologically(
+                    ref dateTimeCategories,
+                    ref cartesianResult);
+            }
+        }
+
         var definition = new QueryChartDefinition
         {
             Kind = kind,
@@ -162,7 +194,8 @@ internal static class KustoChartCompatibilityAnalyzer
             XTitle = visualization.XTitle,
             YTitle = visualization.YTitle,
             Categories = cartesianResult.Categories!,
-            Series = cartesianResult.Series!
+            Series = cartesianResult.Series!,
+            DateTimeCategories = dateTimeCategories
         };
 
         return new QueryChartCompatibility
@@ -301,15 +334,10 @@ internal static class KustoChartCompatibilityAnalyzer
         var series = new List<QueryChartSeries>(seriesMap.Count);
         foreach (var pair in seriesMap.OrderBy(pair => pair.Key, StringComparer.Ordinal))
         {
-            if (pair.Value.Count != categories.Count)
-            {
-                return (null, null, "The result contains missing X/series combinations that can't be charted faithfully.");
-            }
-
             var values = new double[categories.Count];
             for (var i = 0; i < values.Length; i++)
             {
-                values[i] = pair.Value[i];
+                values[i] = pair.Value.TryGetValue(i, out var v) ? v : double.NaN;
             }
 
             series.Add(new QueryChartSeries(pair.Key, values));
@@ -380,6 +408,293 @@ internal static class KustoChartCompatibilityAnalyzer
         return table.TryGetColumnIndex(requestedName, out var index)
             ? table.Columns[index]
             : null;
+    }
+
+    private static string? FindDateTimeColumn(TabularData table)
+    {
+        foreach (var column in table.Columns)
+        {
+            if (IsDateTimeColumn(table, column))
+            {
+                return column;
+            }
+        }
+
+        return null;
+    }
+
+    private static void SortCategoriesChronologically(
+        ref DateTime[] dateTimeCategories,
+        ref (IReadOnlyList<string>? Categories, IReadOnlyList<QueryChartSeries>? Series, string? Reason) cartesianResult)
+    {
+        var categories = cartesianResult.Categories!;
+        var series = cartesianResult.Series!;
+        var count = dateTimeCategories.Length;
+        var dates = dateTimeCategories;
+
+        // Build sort permutation: order[newIndex] = oldIndex
+        var order = new int[count];
+        for (var i = 0; i < count; i++)
+        {
+            order[i] = i;
+        }
+
+        Array.Sort(order, (a, b) => dates[a].CompareTo(dates[b]));
+
+        // If already sorted, nothing to do.
+        var alreadySorted = true;
+        for (var i = 0; i < count; i++)
+        {
+            if (order[i] != i)
+            {
+                alreadySorted = false;
+                break;
+            }
+        }
+
+        if (alreadySorted)
+        {
+            return;
+        }
+
+        var sortedDates = new DateTime[count];
+        var sortedCategories = new string[count];
+        for (var i = 0; i < count; i++)
+        {
+            sortedDates[i] = dateTimeCategories[order[i]];
+            sortedCategories[i] = categories[order[i]];
+        }
+
+        var sortedSeries = new List<QueryChartSeries>(series.Count);
+        foreach (var s in series)
+        {
+            var sortedValues = new double[count];
+            for (var i = 0; i < count; i++)
+            {
+                sortedValues[i] = s.Values[order[i]];
+            }
+
+            sortedSeries.Add(new QueryChartSeries(s.Name, sortedValues));
+        }
+
+        dateTimeCategories = sortedDates;
+        cartesianResult = (sortedCategories, sortedSeries, cartesianResult.Reason);
+    }
+
+    private static DateTime[]? ParseDateTimeCategories(IReadOnlyList<string> categories)
+    {
+        // Lenient: parse what we can. If at least one value parses, return the array
+        // with unparseable entries set to DateTime.MinValue so chronological sort still
+        // operates over the valid timestamps. If nothing parses, return null so the
+        // caller falls back to ordinal X axis.
+        var result = new DateTime[categories.Count];
+        var anyParsed = false;
+        for (var i = 0; i < categories.Count; i++)
+        {
+            if (DateTime.TryParse(
+                    categories[i],
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.RoundtripKind,
+                    out result[i]))
+            {
+                anyParsed = true;
+            }
+            else
+            {
+                result[i] = DateTime.MinValue;
+            }
+        }
+
+        return anyParsed ? result : null;
+    }
+
+    private static IReadOnlyList<string> AutoDetectSeriesColumns(TabularData table, string xColumn)
+    {
+        // Phase 1: string/non-numeric, non-datetime columns are always grouping dimensions.
+        var obvious = table.Columns
+            .Where(column => !string.Equals(column, xColumn, StringComparison.OrdinalIgnoreCase))
+            .Where(column => !IsNumericColumn(table, column))
+            .Where(column => !IsDateTimeColumn(table, column))
+            .ToList();
+
+        if (obvious.Count > 0)
+        {
+            return obvious;
+        }
+
+        // Phase 2: numeric grouping dimensions (e.g. Status=0/1/2). Only attempt this if
+        // X values are duplicated (= long-format grouped data).
+        if (!table.TryGetColumnIndex(xColumn, out var xColIndex))
+        {
+            return obvious;
+        }
+
+        var uniqueXValues = new HashSet<string?>(table.Rows.Select(row => row[xColIndex]), StringComparer.Ordinal);
+        if (uniqueXValues.Count == table.Rows.Count)
+        {
+            // X is unique → wide format. All numeric columns are Y measurements.
+            return [];
+        }
+
+        var rowCount = table.Rows.Count;
+        var uniqueX = uniqueXValues.Count;
+
+        // Pre-compute candidates so we can apply structural checks.
+        var candidates = new List<(string Name, int Distinct, bool LooksLikeAggregate)>();
+        foreach (var column in table.Columns)
+        {
+            if (string.Equals(column, xColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!IsNumericColumn(table, column))
+            {
+                continue;
+            }
+
+            if (!table.TryGetColumnIndex(column, out var colIdx))
+            {
+                continue;
+            }
+
+            // Use parsed-double cardinality so "0", " 0", "0.0" don't count as distinct.
+            var distinct = CountDistinctNumericValues(table, colIdx);
+            candidates.Add((column, distinct, LooksLikeAggregateColumn(column)));
+        }
+
+        if (candidates.Count == 0)
+        {
+            return [];
+        }
+
+        // Strong signal #1: aggregation-name pattern. A column named avg_Foo, sum_Bar,
+        // count_, dcount_, percentile_, AvgCpu, P50Cpu, etc. is virtually always a
+        // measurement, not a dimension. If at least one column matches the pattern,
+        // every aggregate-named column is a Y measurement, and every non-aggregate
+        // numeric column is a series-split.
+        if (candidates.Any(c => c.LooksLikeAggregate))
+        {
+            return candidates
+                .Where(c => !c.LooksLikeAggregate)
+                .Select(c => c.Name)
+                .ToList();
+        }
+
+        // Strong signal #2: structural fit. A series-split dimension D for long-format
+        // (X, D, Y) data should satisfy: distinct(X) * distinct(D) ≈ rowCount, i.e.
+        // each (X, D) combination appears about once. Allow ±20% slack for missing
+        // points. Pick the column with the cardinality that fits best.
+        var fitting = candidates
+            .Where(c => c.Distinct >= 2 && c.Distinct <= uniqueX)
+            .Select(c => new
+            {
+                c.Name,
+                c.Distinct,
+                Expected = (double)(uniqueX * c.Distinct),
+                Ratio = (double)rowCount / Math.Max(1, uniqueX * c.Distinct)
+            })
+            .Where(c => c.Ratio is >= 0.8 and <= 1.2)
+            .OrderBy(c => Math.Abs(c.Ratio - 1.0))
+            .ToList();
+
+        if (fitting.Count == 0)
+        {
+            // No column fits the long-format structure; treat all numeric as Y.
+            return [];
+        }
+
+        // Pick the single best-fitting series column. Multiple grouping dims would
+        // require Y-per-(D1,D2,...) which BuildGroupedSeries already handles, but
+        // auto-promoting more than one is risky — keep it conservative.
+        return [fitting[0].Name];
+    }
+
+    private static int CountDistinctNumericValues(TabularData table, int columnIndex)
+    {
+        var set = new HashSet<double>();
+        var sawNonNumeric = false;
+        foreach (var row in table.Rows)
+        {
+            if (columnIndex >= row.Count)
+            {
+                continue;
+            }
+
+            var raw = row[columnIndex];
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                continue;
+            }
+
+            if (double.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v))
+            {
+                set.Add(v);
+            }
+            else
+            {
+                sawNonNumeric = true;
+            }
+        }
+
+        return sawNonNumeric ? set.Count + 1 : set.Count;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex AggregateColumnPattern =
+        new(@"^(avg|sum|count|dcount|min|max|stdev|stdevp|variance|variancep|percentile|p\d+|median|countif|sumif|avgif)([_A-Z]|$)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static bool LooksLikeAggregateColumn(string columnName)
+    {
+        if (string.IsNullOrWhiteSpace(columnName))
+        {
+            return false;
+        }
+
+        return AggregateColumnPattern.IsMatch(columnName);
+    }
+
+    private static bool IsDateTimeColumn(TabularData table, string columnName)
+    {
+        if (!table.TryGetColumnIndex(columnName, out var columnIndex))
+        {
+            return false;
+        }
+
+        // Lenient: a column counts as datetime if a strong majority (≥80%) of its
+        // non-empty values parse. A single corrupt row shouldn't disqualify the column.
+        var parsed = 0;
+        var nonEmpty = 0;
+        foreach (var row in table.Rows)
+        {
+            if (columnIndex >= row.Count)
+            {
+                continue;
+            }
+
+            var value = row[columnIndex];
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            nonEmpty++;
+            if (DateTime.TryParse(
+                    value,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.RoundtripKind,
+                    out _))
+            {
+                parsed++;
+            }
+        }
+
+        if (nonEmpty == 0)
+        {
+            return false;
+        }
+
+        return parsed * 5 >= nonEmpty * 4; // ≥80%
     }
 
     private static bool IsNumericColumn(TabularData table, string columnName)

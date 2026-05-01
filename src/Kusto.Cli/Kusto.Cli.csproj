@@ -26,6 +26,7 @@
     <PackageReference Include="Microsoft.Azure.Kusto.Language" Version="12.3.2" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.3" />
+    <PackageReference Include="ScottPlot" Version="5.1.58" />
     <PackageReference Include="System.CommandLine" Version="2.0.3" />
   </ItemGroup>
 
