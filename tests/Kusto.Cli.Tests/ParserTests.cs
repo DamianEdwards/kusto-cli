@@ -54,11 +54,13 @@ public sealed class ParserTests
         Assert.Empty(result.Errors);
     }
 
-    [Fact]
-    public void Parse_Examples_AcceptsAlias()
+    [Theory]
+    [InlineData("example")]
+    [InlineData("samples")]
+    public void Parse_Examples_AcceptsAlias(string alias)
     {
         var rootCommand = CommandFactory.CreateRootCommand();
-        var result = rootCommand.Parse(["example"], new ParserConfiguration());
+        var result = rootCommand.Parse([alias], new ParserConfiguration());
         Assert.Empty(result.Errors);
     }
 

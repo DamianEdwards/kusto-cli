@@ -37,6 +37,7 @@ public static class CommandFactory
     {
         var examplesCommand = new Command("examples", "Show usage examples, aliases, and quick-start commands.");
         examplesCommand.Aliases.Add("example");
+        examplesCommand.Aliases.Add("samples");
         examplesCommand.Aliases.Add("aliases");
         examplesCommand.SetAction((parseResult, cancellationToken) =>
         {
@@ -57,7 +58,7 @@ public static class CommandFactory
                             ["Run KQL", "kusto query --format markdown --chart \"StormEvents | summarize Count=count() by State | top 5 by Count desc | render piechart\" --cluster help --database Samples"],
                             ["Run KQL", "kusto query \"StormEvents | summarize EventCount=count() by State | top 10 by EventCount desc\" --format csv --cluster help --database Samples > top-states.csv"],
                             ["Run KQL", "kusto query --file .\\queries\\top-states.kql --cluster help --database Samples"],
-                            ["Optional aliases", "aliases | clusters | db | databases | tables | ls | get | schema | rm | delete | use | run | exec | --db | --limit | -f"]
+                            ["Optional aliases", "aliases | samples | clusters | db | databases | tables | ls | get | schema | rm | delete | use | run | exec | --db | --limit | -f"]
                         ])
                 }), cancellationToken);
         });
