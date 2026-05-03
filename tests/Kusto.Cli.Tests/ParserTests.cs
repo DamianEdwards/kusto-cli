@@ -178,5 +178,6 @@ public sealed class ParserTests
         var rootCommand = CommandFactory.CreateRootCommand();
         var result = rootCommand.Parse(["aliases"], new ParserConfiguration());
         Assert.Empty(result.Errors);
+        Assert.Empty(rootCommand.Parse(["samples"], new ParserConfiguration()).Errors);
     }
 }
