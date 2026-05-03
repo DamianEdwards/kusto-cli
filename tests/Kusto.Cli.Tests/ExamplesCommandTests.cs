@@ -21,7 +21,7 @@ public sealed class ExamplesCommandTests
             Assert.Equal(0, exitCode);
             var output = outputWriter.ToString();
             Assert.Contains("Optional aliases", output, StringComparison.Ordinal);
-            Assert.Contains("samples", output, StringComparison.Ordinal);
+            Assert.Contains("aliases | samples", output, StringComparison.Ordinal);
         }
         finally
         {
