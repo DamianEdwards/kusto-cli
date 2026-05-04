@@ -13,6 +13,7 @@ public sealed class OutputFormatter : IOutputFormatter
             OutputFormat.Json => JsonSerializer.Serialize(output, KustoJsonSerializerContext.Default.CliOutput),
             OutputFormat.Markdown => FormatMarkdown(output),
             OutputFormat.Csv => FormatCsv(output),
+            OutputFormat.Tsv => FormatTsv(output),
             _ => FormatHuman(output)
         };
     }
@@ -134,6 +135,24 @@ public sealed class OutputFormatter : IOutputFormatter
         foreach (var row in table.Rows)
         {
             AppendCsvRow(buffer, row);
+        }
+
+        return buffer.ToString().TrimEnd('\r', '\n');
+    }
+
+    private static string FormatTsv(CliOutput output)
+    {
+        if (output.Table is not { Columns.Count: > 0 } table)
+        {
+            return string.Empty;
+        }
+
+        var buffer = new StringBuilder();
+        AppendTsvRow(buffer, table.Columns);
+
+        foreach (var row in table.Rows)
+        {
+            AppendTsvRow(buffer, row);
         }
 
         return buffer.ToString().TrimEnd('\r', '\n');
@@ -278,6 +297,32 @@ public sealed class OutputFormatter : IOutputFormatter
         }
 
         return $"\"{text.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+    }
+
+    private static void AppendTsvRow(StringBuilder buffer, IEnumerable<string?> values)
+    {
+        var firstValue = true;
+        foreach (var value in values)
+        {
+            if (!firstValue)
+            {
+                buffer.Append('\t');
+            }
+
+            buffer.Append(EscapeTsvValue(value));
+            firstValue = false;
+        }
+
+        buffer.AppendLine();
+    }
+
+    private static string EscapeTsvValue(string? value)
+    {
+        return (value ?? string.Empty)
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\t", "\\t", StringComparison.Ordinal)
+            .Replace("\r", "\\r", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal);
     }
 
     private static string BuildHumanTextOutput(CliOutput output, int? availableWidth)

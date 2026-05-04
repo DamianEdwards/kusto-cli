@@ -16,7 +16,8 @@ public static class CliRunner
         OutputFormat.Human,
         OutputFormat.Json,
         OutputFormat.Markdown,
-        OutputFormat.Csv
+        OutputFormat.Csv,
+        OutputFormat.Tsv
     ];
 
     public static Task<int> RunAsync(
@@ -81,6 +82,7 @@ public static class CliRunner
             "markdown" => OutputFormat.Markdown,
             "md" => OutputFormat.Markdown,
             "csv" => OutputFormat.Csv,
+            "tsv" => OutputFormat.Tsv,
             _ => throw new UserFacingException(
                 $"'{formatToken}' is not a valid output format. Use one of: {DescribeOutputFormats(RecognizedFormats)}.")
         };
@@ -173,6 +175,11 @@ public static class CliRunner
         if (uniqueFormats.Contains(OutputFormat.Csv))
         {
             tokens.Add("csv");
+        }
+
+        if (uniqueFormats.Contains(OutputFormat.Tsv))
+        {
+            tokens.Add("tsv");
         }
 
         return string.Join(", ", tokens);
