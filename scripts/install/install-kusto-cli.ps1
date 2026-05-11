@@ -155,6 +155,7 @@ function Invoke-GitHubAssetDownload
     }
 
     $headers = @{
+        Accept       = 'application/octet-stream'
         'User-Agent' = 'kusto-cli-install-script'
     }
     if ($token)
@@ -196,6 +197,18 @@ function Get-ReleaseAsset
     )
 
     return $Release.assets | Where-Object { $_.name -eq $AssetName } | Select-Object -First 1
+}
+
+function Get-ReleaseAssetDownloadUri
+{
+    param([Parameter(Mandatory)]$Asset)
+
+    if (-not [string]::IsNullOrWhiteSpace($Asset.url))
+    {
+        return $Asset.url
+    }
+
+    return $Asset.browser_download_url
 }
 
 function Get-WindowsArchitecture
@@ -1182,8 +1195,9 @@ function Invoke-KustoCliInstall
         New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 
         Invoke-StatusStep -Message "Downloading $releaseStatusLabel" -Action {
-            Write-Verbose "Downloading release asset from '$($asset.browser_download_url)' to '$downloadPath'."
-            Invoke-GitHubAssetDownload -Uri $asset.browser_download_url -OutFile $downloadPath
+            $assetDownloadUri = Get-ReleaseAssetDownloadUri -Asset $asset
+            Write-Verbose "Downloading release asset from '$assetDownloadUri' to '$downloadPath'."
+            Invoke-GitHubAssetDownload -Uri $assetDownloadUri -OutFile $downloadPath
         }
 
         if ($Quality -ne 'Dev')
@@ -1195,16 +1209,18 @@ function Invoke-KustoCliInstall
             }
 
             $checksumsPath = Join-Path $tempRoot 'checksums.txt'
-            Write-Verbose "Downloading checksums from '$($checksumsAsset.browser_download_url)' to '$checksumsPath'."
-            Invoke-GitHubAssetDownload -Uri $checksumsAsset.browser_download_url -OutFile $checksumsPath
+            $checksumsDownloadUri = Get-ReleaseAssetDownloadUri -Asset $checksumsAsset
+            Write-Verbose "Downloading checksums from '$checksumsDownloadUri' to '$checksumsPath'."
+            Invoke-GitHubAssetDownload -Uri $checksumsDownloadUri -OutFile $checksumsPath
 
             $releaseMetadataPath = $null
             $releaseMetadataAsset = Get-ReleaseAsset -Release $release -AssetName 'release-metadata.json'
             if ($null -ne $releaseMetadataAsset)
             {
                 $releaseMetadataPath = Join-Path $tempRoot 'release-metadata.json'
-                Write-Verbose "Downloading release metadata from '$($releaseMetadataAsset.browser_download_url)' to '$releaseMetadataPath'."
-                Invoke-GitHubAssetDownload -Uri $releaseMetadataAsset.browser_download_url -OutFile $releaseMetadataPath
+                $releaseMetadataDownloadUri = Get-ReleaseAssetDownloadUri -Asset $releaseMetadataAsset
+                Write-Verbose "Downloading release metadata from '$releaseMetadataDownloadUri' to '$releaseMetadataPath'."
+                Invoke-GitHubAssetDownload -Uri $releaseMetadataDownloadUri -OutFile $releaseMetadataPath
             }
 
             Invoke-StatusStep -Message 'Verifying asset checksums' -Action {
