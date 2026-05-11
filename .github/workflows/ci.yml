@@ -171,6 +171,14 @@ jobs:
         shell: pwsh
         run: ./scripts/Publish-NativeAsset.ps1 -RuntimeIdentifier '${{ matrix.rid }}' -Version '${{ needs.version.outputs.version }}' -ArtifactsDirectory './artifacts/dev'
 
+      - name: Smoke-test packaged archive
+        # Skip cross-arch smoke tests: GitHub-hosted runners can't execute
+        # win-arm64 / linux-arm64 binaries on x64 runners, and the *-arm64
+        # AOT publish above already validated the archive shape.
+        if: ${{ !endsWith(matrix.rid, '-arm64') }}
+        shell: pwsh
+        run: ./scripts/Test-PackagedArchive.ps1 -RuntimeIdentifier '${{ matrix.rid }}' -Version '${{ needs.version.outputs.version }}' -ArtifactsDirectory './artifacts/dev' -SkipPublish
+
       - name: Upload dev artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
@@ -226,6 +234,11 @@ jobs:
       - name: Publish native asset
         shell: pwsh
         run: ./scripts/Publish-NativeAsset.ps1 -RuntimeIdentifier '${{ matrix.rid }}' -Version '${{ needs.version.outputs.rc_version }}' -ArtifactsDirectory './artifacts/rc'
+
+      - name: Smoke-test packaged archive
+        if: ${{ !endsWith(matrix.rid, '-arm64') }}
+        shell: pwsh
+        run: ./scripts/Test-PackagedArchive.ps1 -RuntimeIdentifier '${{ matrix.rid }}' -Version '${{ needs.version.outputs.rc_version }}' -ArtifactsDirectory './artifacts/rc' -SkipPublish
 
       - name: Upload RC artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f

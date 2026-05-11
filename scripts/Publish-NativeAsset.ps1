@@ -82,6 +82,69 @@ function Get-WindowsTargetArchitecture
     }
 }
 
+function Get-RequiredPayloadFileNames
+{
+    param(
+        [Parameter(Mandatory)][string]$RuntimeIdentifier,
+        [Parameter(Mandatory)][string]$BinaryName
+    )
+
+    $platform = $RuntimeIdentifier.Split('-', 2)[0]
+    switch ($platform)
+    {
+        'win'
+        {
+            return @(
+                $BinaryName,
+                'libSkiaSharp.dll',
+                'libHarfBuzzSharp.dll',
+                'LICENSE'
+            )
+        }
+        'linux'
+        {
+            return @(
+                $BinaryName,
+                'libSkiaSharp.so',
+                'libHarfBuzzSharp.so',
+                'LICENSE'
+            )
+        }
+        'osx'
+        {
+            return @(
+                $BinaryName,
+                'libSkiaSharp.dylib',
+                'libHarfBuzzSharp.dylib',
+                'LICENSE'
+            )
+        }
+        default
+        {
+            throw "Unsupported platform '$platform' in runtime identifier '$RuntimeIdentifier'."
+        }
+    }
+}
+
+function Assert-StagedPayloadComplete
+{
+    param(
+        [Parameter(Mandatory)][string]$StagingDirectory,
+        [Parameter(Mandatory)][string]$RuntimeIdentifier,
+        [Parameter(Mandatory)][string]$BinaryName
+    )
+
+    $required = Get-RequiredPayloadFileNames -RuntimeIdentifier $RuntimeIdentifier -BinaryName $BinaryName
+    $stagedFileNames = (Get-ChildItem -Path $StagingDirectory -File -Recurse | ForEach-Object { $_.Name }) | Sort-Object -Unique
+    $missing = @($required | Where-Object { $_ -notin $stagedFileNames })
+
+    if ($missing.Count -gt 0)
+    {
+        $stagedListing = (Get-ChildItem -Path $StagingDirectory -File -Recurse | ForEach-Object { $_.FullName.Substring($StagingDirectory.Length).TrimStart('\','/') }) -join "`n  "
+        throw "Staged payload for runtime '$RuntimeIdentifier' is missing required file(s): $($missing -join ', '). Staged contents:`n  $stagedListing"
+    }
+}
+
 function Invoke-DotNetPublish
 {
     param(
@@ -156,8 +219,49 @@ try
     }
 
     New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
-    Copy-Item $binaryPath (Join-Path $stagingDirectory $binaryName) -Force
+
+    # Copy the entire publish payload (not just the binary) so native sidecars
+    # required by SkiaSharp/HarfBuzz at runtime are included in the release
+    # archive. Skip debug symbols and IDE/build artifacts that aren't needed
+    # at runtime — these would only inflate the archive.
+    $excludePatterns = @('*.pdb', '*.xml', '*.deps.json.map', '*.dbg', '*.dwarf')
+    $payloadFiles = Get-ChildItem -Path $publishDirectory -File -Recurse |
+        Where-Object {
+            $relative = $_.FullName.Substring($publishDirectory.Length).TrimStart('\','/')
+            foreach ($pattern in $excludePatterns)
+            {
+                if ($_.Name -like $pattern) { return $false }
+            }
+            return $true
+        }
+
+    foreach ($file in $payloadFiles)
+    {
+        $relative = $file.FullName.Substring($publishDirectory.Length).TrimStart('\','/')
+        $destination = Join-Path $stagingDirectory $relative
+        $destinationDir = Split-Path -Parent $destination
+        if (-not [string]::IsNullOrEmpty($destinationDir) -and -not (Test-Path $destinationDir))
+        {
+            New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
+        }
+
+        Copy-Item $file.FullName $destination -Force
+    }
+
     Copy-Item (Join-Path $repoRoot 'LICENSE') (Join-Path $stagingDirectory 'LICENSE') -Force
+
+    $thirdPartyNoticesPath = Join-Path $repoRoot 'THIRD-PARTY-NOTICES.md'
+    if (Test-Path $thirdPartyNoticesPath)
+    {
+        Copy-Item $thirdPartyNoticesPath (Join-Path $stagingDirectory 'THIRD-PARTY-NOTICES.md') -Force
+    }
+
+    # Assert the staged payload contains every file users need at runtime. If
+    # ScottPlot/SkiaSharp ever drops a backend, restructures its native packaging,
+    # or stops publishing native assets for a RID, the missing-file failure here
+    # will fail the build instead of producing a broken archive that explodes
+    # with DllNotFoundException at first chart render.
+    Assert-StagedPayloadComplete -StagingDirectory $stagingDirectory -RuntimeIdentifier $RuntimeIdentifier -BinaryName $binaryName
 
     $assetPath =
         if ($platform -eq 'win')

@@ -105,7 +105,56 @@ public sealed class QueryCommandTests
             Console.SetError(originalError);
         }
     }
+
+    [Fact]
+    public async Task Query_WithOutputChartWidth_WithoutOutputChart_ReturnsError()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var originalError = Console.Error;
+        using var errorWriter = new StringWriter();
+        Console.SetError(errorWriter);
+
+        try
+        {
+            var exitCode = await rootCommand.Parse(
+                    ["query", "print 1", "--output-chart-width", "1024"],
+                    new ParserConfiguration())
+                .InvokeAsync();
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("--output-chart", errorWriter.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+    }
+
+    [Fact]
+    public async Task Query_WithOutputChartHeight_WithoutOutputChart_ReturnsError()
+    {
+        var rootCommand = CommandFactory.CreateRootCommand();
+        var originalError = Console.Error;
+        using var errorWriter = new StringWriter();
+        Console.SetError(errorWriter);
+
+        try
+        {
+            var exitCode = await rootCommand.Parse(
+                    ["query", "print 1", "--output-chart-height", "600"],
+                    new ParserConfiguration())
+                .InvokeAsync();
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("--output-chart", errorWriter.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+    }
 }
 
 [CollectionDefinition("Console", DisableParallelization = true)]
 public sealed class ConsoleCollectionDefinition;
+

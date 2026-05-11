@@ -24,6 +24,8 @@ public sealed class CliOutput
     public string? HumanChartAnsi { get; init; }
     [JsonIgnore]
     public string? MarkdownChart { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ChartOutputPath { get; init; }
     [JsonIgnore]
     public bool IsQueryResultTable { get; init; }
 }
@@ -303,6 +305,12 @@ internal sealed class QueryChartDefinition
     public string? YTitle { get; init; }
     public IReadOnlyList<string> Categories { get; init; } = [];
     public IReadOnlyList<QueryChartSeries> Series { get; init; } = [];
+
+    /// <summary>
+    /// When the X axis values are datetimes, this carries their parsed values so renderers
+    /// can use a proper DateTime axis instead of formatted strings.
+    /// </summary>
+    public DateTime[]? DateTimeCategories { get; init; }
 }
 
 internal sealed class QueryChartCompatibility

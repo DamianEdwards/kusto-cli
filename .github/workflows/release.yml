@@ -186,7 +186,10 @@ jobs:
           signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
           certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
           files-folder: ${{ github.workspace }}\artifacts\windows-assets
-          files-folder-filter: kusto.exe
+          # Sign every executable payload file we ship: kusto.exe and the native
+          # SkiaSharp/HarfBuzz sidecars. A signed kusto.exe loading unsigned
+          # native DLLs at first chart render would defeat the trust chain.
+          files-folder-filter: kusto.exe,libSkiaSharp.dll,libHarfBuzzSharp.dll
           files-folder-recurse: true
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
@@ -205,13 +208,18 @@ jobs:
       - name: Verify signed Windows issuer
         shell: pwsh
         run: |
-          $binaryPaths = @(Get-ChildItem -Path './artifacts/windows-assets' -Recurse -Filter 'kusto.exe' -File)
-          if ($binaryPaths.Count -eq 0) {
-            throw "No signed kusto.exe files were found under './artifacts/windows-assets'."
+          # Each archive expansion is its own subdirectory under ./artifacts/windows-assets.
+          # Verify the trust chain on every executable payload file (kusto.exe + native
+          # sidecars) listed in the installer trust configuration so a missing or
+          # unsigned sidecar causes the release to fail loudly here, not in the field.
+          $payloadRoots = @(Get-ChildItem -Path './artifacts/windows-assets' -Directory)
+          if ($payloadRoots.Count -eq 0) {
+            # Single flat layout — verify the root directly.
+            $payloadRoots = @([pscustomobject]@{ FullName = (Resolve-Path './artifacts/windows-assets').Path })
           }
 
-          foreach ($binaryPath in $binaryPaths) {
-            ./scripts/Verify-WindowsBinaryIssuer.ps1 -BinaryPath $binaryPath.FullName -InstallerScriptPath './scripts/install/install-kusto-cli.ps1'
+          foreach ($payloadRoot in $payloadRoots) {
+            ./scripts/Verify-WindowsBinaryIssuer.ps1 -PayloadDirectory $payloadRoot.FullName -InstallerScriptPath './scripts/install/install-kusto-cli.ps1'
           }
 
       - name: Repack signed Windows assets

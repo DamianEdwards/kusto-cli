@@ -18,3 +18,9 @@ artifacts/
 *.log
 *.tmp
 *.temp
+
+# Local chart renders
+/chart.png
+/cpu.png
+/top-states.png
+/pie.png

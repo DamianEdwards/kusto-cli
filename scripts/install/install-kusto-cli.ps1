@@ -298,6 +298,23 @@ function Get-KustoInstallerTrustConfiguration
         ExpectedSignerSubject = $ExpectedSignerSubject
         ExpectedSignerIssuerSha512Thumbprints = @($ExpectedSignerIssuerSha512Thumbprints)
         ExpectedSignerParentIssuerSha512Thumbprints = @($ExpectedSignerParentIssuerSha512Thumbprints)
+        # Expected executable payload files inside a Windows release archive. Every
+        # file listed here must be present after extraction, must be Authenticode-signed
+        # by the configured signer, and is also tracked by the installer so that
+        # upgrades can clean up sidecars that future versions remove. Update this list
+        # alongside any change to the publish/signing pipeline (see
+        # scripts/Publish-NativeAsset.ps1).
+        ExpectedExecutablePayloadFiles = @(
+            'kusto.exe',
+            'libSkiaSharp.dll',
+            'libHarfBuzzSharp.dll'
+        )
+        # Non-executable payload files that should be carried alongside the binaries.
+        # These don't need signing but the installer should still keep them in sync.
+        ExpectedAuxiliaryPayloadFiles = @(
+            'LICENSE',
+            'THIRD-PARTY-NOTICES.md'
+        )
     }
 }
 
@@ -444,7 +461,146 @@ function Expand-WindowsReleaseArchive
     }
 
     Write-Verbose "Found extracted Windows binary '$binaryPath'."
-    return $binaryPath
+    return [pscustomobject]@{
+        BinaryPath = $binaryPath
+        ExtractDirectory = $DestinationPath
+    }
+}
+
+function Assert-ExtractedPayloadComplete
+{
+    param(
+        [Parameter(Mandatory)][string]$ExtractDirectory,
+        [Parameter(Mandatory)][string[]]$RequiredFileNames
+    )
+
+    $present = @(Get-ChildItem -Path $ExtractDirectory -File | ForEach-Object { $_.Name })
+    $missing = @($RequiredFileNames | Where-Object { $_ -notin $present })
+    if ($missing.Count -gt 0)
+    {
+        $listing = ($present | Sort-Object) -join ', '
+        throw "Extracted archive at '$ExtractDirectory' is missing required file(s): $($missing -join ', '). Found: $listing."
+    }
+}
+
+function Install-KustoPayload
+{
+    param(
+        [Parameter(Mandatory)][string]$SourceDirectory,
+        [Parameter(Mandatory)][string]$InstallDirectory,
+        [string[]]$KnownPayloadFileNames = @()
+    )
+
+    # Strategy: stage the new payload to a sibling ".new" directory, then atomically
+    # replace the install dir by renaming the existing dir aside, renaming the new
+    # one in, and deleting the side-aside dir. If anything in the rename dance fails
+    # (e.g. another process holds a file open), fall back to overlay-copy + cleanup
+    # of stale managed files so the upgrade still completes.
+
+    $installRoot = [System.IO.Path]::GetFullPath($InstallDirectory)
+    $stagingDir = $installRoot + '.new'
+    $previousDir = $installRoot + '.old'
+
+    if (Test-Path $stagingDir)
+    {
+        Remove-Item $stagingDir -Recurse -Force
+    }
+    if (Test-Path $previousDir)
+    {
+        Remove-Item $previousDir -Recurse -Force
+    }
+
+    # Stage: copy the entire extracted payload into installRoot.new
+    New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+    Copy-Item -Path (Join-Path $SourceDirectory '*') -Destination $stagingDir -Recurse -Force
+
+    $atomicSwapCompleted = $false
+    if (Test-Path $installRoot)
+    {
+        try
+        {
+            Rename-Item -Path $installRoot -NewName ([System.IO.Path]::GetFileName($previousDir)) -ErrorAction Stop
+            try
+            {
+                Rename-Item -Path $stagingDir -NewName ([System.IO.Path]::GetFileName($installRoot)) -ErrorAction Stop
+                $atomicSwapCompleted = $true
+            }
+            catch
+            {
+                # Couldn't rename staging in. Restore the previous dir.
+                Write-Verbose "Atomic install swap failed renaming staging into place; restoring previous install. $($_.Exception.Message)"
+                if (-not (Test-Path $installRoot))
+                {
+                    Rename-Item -Path $previousDir -NewName ([System.IO.Path]::GetFileName($installRoot)) -ErrorAction SilentlyContinue
+                }
+                throw
+            }
+        }
+        catch [System.IO.IOException]
+        {
+            Write-Verbose "Atomic install swap unavailable (likely a file is in use). Falling back to overlay copy. $($_.Exception.Message)"
+        }
+    }
+    else
+    {
+        Rename-Item -Path $stagingDir -NewName ([System.IO.Path]::GetFileName($installRoot)) -ErrorAction Stop
+        $atomicSwapCompleted = $true
+    }
+
+    if ($atomicSwapCompleted)
+    {
+        if (Test-Path $previousDir)
+        {
+            try
+            {
+                Remove-Item $previousDir -Recurse -Force
+            }
+            catch
+            {
+                Write-Verbose "Could not delete previous install at '$previousDir' after swap. $($_.Exception.Message)"
+            }
+        }
+
+        if (Test-Path $stagingDir)
+        {
+            Remove-Item $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        return
+    }
+
+    # Fallback overlay path. First, remove stale known-managed files so previously
+    # installed sidecars that the new release dropped don't linger and shadow the
+    # ones bundled with .NET host probing.
+    if (Test-Path $installRoot)
+    {
+        foreach ($knownName in $KnownPayloadFileNames)
+        {
+            $stalePath = Join-Path $installRoot $knownName
+            if (Test-Path $stalePath)
+            {
+                try
+                {
+                    Remove-Item $stalePath -Force
+                }
+                catch
+                {
+                    Write-Verbose "Could not delete stale managed file '$stalePath' before overlay copy. $($_.Exception.Message)"
+                }
+            }
+        }
+    }
+    else
+    {
+        New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
+    }
+
+    Copy-Item -Path (Join-Path $stagingDir '*') -Destination $installRoot -Recurse -Force
+
+    if (Test-Path $stagingDir)
+    {
+        Remove-Item $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Invoke-StatusStep
@@ -1056,12 +1212,28 @@ function Invoke-KustoCliInstall
             }
         }
 
-        $downloadedBinaryPath = Expand-WindowsReleaseArchive -ArchivePath $downloadPath -DestinationPath $extractPath
+        $extractedPayload = Expand-WindowsReleaseArchive -ArchivePath $downloadPath -DestinationPath $extractPath
+        $downloadedBinaryPath = $extractedPayload.BinaryPath
+        $extractDirectory = $extractedPayload.ExtractDirectory
+
+        $trustConfig = Get-KustoInstallerTrustConfiguration
+        $expectedExecutablePayload = @($trustConfig.ExpectedExecutablePayloadFiles)
+        $expectedAuxiliaryPayload = @($trustConfig.ExpectedAuxiliaryPayloadFiles)
+        $allExpectedPayload = @($expectedExecutablePayload + $expectedAuxiliaryPayload)
+
+        Assert-ExtractedPayloadComplete -ExtractDirectory $extractDirectory -RequiredFileNames $expectedExecutablePayload
 
         if ($Quality -ne 'Dev')
         {
             Invoke-StatusStep -Message 'Verifying asset provenance' -Action {
-                $null = Assert-WindowsBinaryTrust -BinaryPath $downloadedBinaryPath -ExpectedSubject $ExpectedSignerSubject -ExpectedIssuerSha512Thumbprints $ExpectedSignerIssuerSha512Thumbprints -ExpectedParentIssuerSha512Thumbprints $ExpectedSignerParentIssuerSha512Thumbprints
+                # Verify Authenticode trust on every executable payload file (kusto.exe + native sidecars).
+                # Treating the .exe alone as the trust signal would let an unsigned/swapped libSkiaSharp.dll
+                # be loaded by a signed kusto.exe at first chart render.
+                foreach ($payloadName in $expectedExecutablePayload)
+                {
+                    $payloadPath = Join-Path $extractDirectory $payloadName
+                    $null = Assert-WindowsBinaryTrust -BinaryPath $payloadPath -ExpectedSubject $ExpectedSignerSubject -ExpectedIssuerSha512Thumbprints $ExpectedSignerIssuerSha512Thumbprints -ExpectedParentIssuerSha512Thumbprints $ExpectedSignerParentIssuerSha512Thumbprints
+                }
             }
         }
         else
@@ -1095,7 +1267,10 @@ function Invoke-KustoCliInstall
         if ($shouldInstall)
         {
             Invoke-StatusStep -Message "Installing $downloadedVersion to '$installDirectory'" -Action {
-                Copy-Item -Path $downloadedBinaryPath -Destination $destinationPath -Force
+                Install-KustoPayload `
+                    -SourceDirectory $extractDirectory `
+                    -InstallDirectory $installDirectory `
+                    -KnownPayloadFileNames $allExpectedPayload
             }
         }
 
