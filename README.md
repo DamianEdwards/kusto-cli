@@ -629,7 +629,7 @@ The GitHub workflows install or configure the required toolchains for CI. When p
 ## Run from source
 
 ```powershell
-.\kusto query "StormEvents | take 5" --cluster https://help.kusto.windows.net --database Samples
+.\kusto.cmd query "StormEvents | take 5" --cluster https://help.kusto.windows.net --database Samples
 ```
 
 ## Publish the native executable locally
