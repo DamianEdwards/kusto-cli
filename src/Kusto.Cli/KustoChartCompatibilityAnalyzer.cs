@@ -483,29 +483,20 @@ internal static class KustoChartCompatibilityAnalyzer
 
     private static DateTime[]? ParseDateTimeCategories(IReadOnlyList<string> categories)
     {
-        // Lenient: parse what we can. If at least one value parses, return the array
-        // with unparseable entries set to DateTime.MinValue so chronological sort still
-        // operates over the valid timestamps. If nothing parses, return null so the
-        // caller falls back to ordinal X axis.
         var result = new DateTime[categories.Count];
-        var anyParsed = false;
         for (var i = 0; i < categories.Count; i++)
         {
-            if (DateTime.TryParse(
+            if (!DateTime.TryParse(
                     categories[i],
                     System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.RoundtripKind,
                     out result[i]))
             {
-                anyParsed = true;
-            }
-            else
-            {
-                result[i] = DateTime.MinValue;
+                return null;
             }
         }
 
-        return anyParsed ? result : null;
+        return result;
     }
 
     private static IReadOnlyList<string> AutoDetectSeriesColumns(TabularData table, string xColumn)

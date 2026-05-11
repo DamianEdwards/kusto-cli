@@ -302,10 +302,10 @@ public sealed class KustoChartCompatibilityAnalyzerTests
     }
 
     [Fact]
-    public void Analyze_DateTimeXValues_PartialParseFailures_StillSorts()
+    public void Analyze_DateTimeXValues_PartialParseFailures_FallsBackToOrdinalAxis()
     {
-        // One row out of five has a corrupt timestamp; remaining rows should still
-        // be detected as datetime and sorted chronologically.
+        // One row out of five has a corrupt timestamp; avoid substituting a bogus
+        // DateTime.MinValue point far outside the real data range.
         var t0 = new DateTime(2024, 1, 15, 10, 0, 0, DateTimeKind.Utc).ToString("o");
         var t1 = new DateTime(2024, 1, 15, 10, 5, 0, DateTimeKind.Utc).ToString("o");
         var t2 = new DateTime(2024, 1, 15, 10, 10, 0, DateTimeKind.Utc).ToString("o");
@@ -324,15 +324,7 @@ public sealed class KustoChartCompatibilityAnalyzerTests
         var result = KustoChartCompatibilityAnalyzer.Analyze(table, visualization);
 
         Assert.NotNull(result.HumanChart);
-        Assert.NotNull(result.HumanChart!.DateTimeCategories);
-        // 4 valid timestamps + 1 garbage = 5 entries
-        Assert.Equal(5, result.HumanChart.DateTimeCategories!.Length);
-        // Garbage parsed as MinValue should sort to position 0; valid timestamps
-        // sorted chronologically follow.
-        var dates = result.HumanChart.DateTimeCategories;
-        Assert.Equal(DateTime.MinValue, dates[0]);
-        Assert.True(dates[1] < dates[2]);
-        Assert.True(dates[2] < dates[3]);
-        Assert.True(dates[3] < dates[4]);
+        Assert.Null(result.HumanChart!.DateTimeCategories);
+        Assert.Equal([t2, t0, "garbage", t3, t1], result.HumanChart.Categories);
     }
 }

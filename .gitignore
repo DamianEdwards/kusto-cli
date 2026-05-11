@@ -20,4 +20,7 @@ artifacts/
 *.temp
 
 # Local chart renders
-*.png
+/chart.png
+/cpu.png
+/top-states.png
+/pie.png
