@@ -52,7 +52,7 @@ kusto cluster add help https://help.kusto.windows.net/
 kusto cluster add help https://help.kusto.windows.net/ --use
 
 # 2) Set default database for that cluster
-kusto database set-default Samples --cluster help
+kusto database set-default Samples --cluster https://help.kusto.windows.net
 
 # 3) Run a query
 kusto query "StormEvents | take 5"
@@ -356,43 +356,43 @@ kusto cluster remove help
 kusto database list
 
 # List using explicit cluster and filter/take
-kusto database list --cluster help --filter "^Sam" --take 5
-kusto database list --cluster help --filter "ples$"
+kusto database list --cluster https://help.kusto.windows.net --filter "^Sam" --take 5
+kusto database list --cluster https://help.kusto.windows.net --filter "ples$"
 
 # Show one database
-kusto database show Samples --cluster help
+kusto database show Samples --cluster https://help.kusto.windows.net
 
 # Set default DB for a cluster
-kusto database set-default Samples --cluster help
+kusto database set-default Samples --cluster https://help.kusto.windows.net
 ```
 
 ### Table commands
 
 ```powershell
 # List tables using default DB for selected/default cluster
-kusto table list --cluster help --database Samples
+kusto table list --cluster https://help.kusto.windows.net --database Samples
 
 # Filtered table listing
-kusto table list --cluster help --database Samples --filter "^Storm" --take 10
+kusto table list --cluster https://help.kusto.windows.net --database Samples --filter "^Storm" --take 10
 
 # Show a specific table schema/details
-kusto table show StormEvents --cluster help --database Samples
+kusto table show StormEvents --cluster https://help.kusto.windows.net --database Samples
 
 # Force a live refresh of the cached table details
-kusto table show StormEvents --cluster help --database Samples --refresh-offline-data
+kusto table show StormEvents --cluster https://help.kusto.windows.net --database Samples --refresh-offline-data
 
 # Add and inspect table notes
-kusto table notes StormEvents --cluster help --database Samples --add "Use this table for weather samples."
-kusto table notes StormEvents --cluster help --database Samples
+kusto table notes StormEvents --cluster https://help.kusto.windows.net --database Samples --add "Use this table for weather samples."
+kusto table notes StormEvents --cluster https://help.kusto.windows.net --database Samples
 
 # Delete a specific note or clear notes
-kusto table notes StormEvents --cluster help --database Samples --delete 1
+kusto table notes StormEvents --cluster https://help.kusto.windows.net --database Samples --delete 1
 kusto table notes --clear --force
 
 # Export/import or clear offline data
 kusto table --export-offline-data .\offline-table-data.json
 kusto table --import-offline-data .\offline-table-data.json
-kusto table StormEvents --cluster help --database Samples --clear-offline-data --force
+kusto table StormEvents --cluster https://help.kusto.windows.net --database Samples --clear-offline-data --force
 kusto table --purge-offline-data --force
 ```
 
@@ -400,63 +400,63 @@ kusto table --purge-offline-data --force
 
 ```powershell
 # Inline query
-kusto query "StormEvents | summarize Count=count() by State | top 10 by Count desc" --cluster help --database Samples
+kusto query "StormEvents | summarize Count=count() by State | top 10 by Count desc" --cluster https://help.kusto.windows.net --database Samples
 
 # Query from file
-kusto query --file .\queries\top-states.kql --cluster help --database Samples
+kusto query --file .\queries\top-states.kql --cluster https://help.kusto.windows.net --database Samples
 
 # Query a specific line range from a file containing multiple statements
-kusto query --file .\queries\top-states.kql:12-15 --cluster help --database Samples
+kusto query --file .\queries\top-states.kql:12-15 --cluster https://help.kusto.windows.net --database Samples
 
 # Query from stdin
 @"
 StormEvents
 | where StartTime > ago(7d)
 | take 20
-"@ | kusto query - --cluster help --database Samples
+"@ | kusto query - --cluster https://help.kusto.windows.net --database Samples
 
 # Query with execution statistics when available
-kusto query "StormEvents | summarize Count=count() by State" --cluster help --database Samples --show-stats
+kusto query "StormEvents | summarize Count=count() by State" --cluster https://help.kusto.windows.net --database Samples --show-stats
 
 # Render a terminal bar chart
-kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render barchart" --cluster help --database Samples --chart
+kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render barchart" --cluster https://help.kusto.windows.net --database Samples --chart
 
 # Render a terminal time series chart (`timechart` is an alias of `linechart`)
-kusto query "StormEvents | summarize Count=count() by bin(StartTime, 1d) | render timechart" --cluster help --database Samples --chart
+kusto query "StormEvents | summarize Count=count() by bin(StartTime, 1d) | render timechart" --cluster https://help.kusto.windows.net --database Samples --chart
 
 # Emit Mermaid pie chart output in markdown
-kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render piechart" --cluster help --database Samples --format markdown --chart
+kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render piechart" --cluster https://help.kusto.windows.net --database Samples --format markdown --chart
 
 # Save a column chart as a PNG (default 1200×675)
-kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart" --cluster help --database Samples --output-chart ./top-states.png
+kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart" --cluster https://help.kusto.windows.net --database Samples --output-chart ./top-states.png
 
 # Save a PNG and render in the terminal at the same time
-kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart" --cluster help --database Samples --chart --output-chart ./top-states.png
+kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart" --cluster https://help.kusto.windows.net --database Samples --chart --output-chart ./top-states.png
 
 # Save a PNG at a custom size
-kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render piechart" --cluster help --database Samples --output-chart ./pie.png --output-chart-width 1600 --output-chart-height 900
+kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render piechart" --cluster https://help.kusto.windows.net --database Samples --output-chart ./pie.png --output-chart-width 1600 --output-chart-height 900
 
 # Save a PNG while still streaming results as CSV
-kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart" --cluster help --database Samples --format csv --output-chart ./top-states.png > top-states.csv
+kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart" --cluster https://help.kusto.windows.net --database Samples --format csv --output-chart ./top-states.png > top-states.csv
 
 # Save a PNG while capturing results as JSON (chartOutputPath appears in the envelope)
-kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart" --cluster help --database Samples --format json --output-chart ./top-states.png
+kusto query "StormEvents | summarize Count=count() by State | top 5 by Count desc | render columnchart" --cluster https://help.kusto.windows.net --database Samples --format json --output-chart ./top-states.png
 ```
 
 ## Output formats
 
 ```powershell
 # Human-friendly terminal rendering
-kusto table list --cluster help --database Samples --format human
+kusto table list --cluster https://help.kusto.windows.net --database Samples --format human
 
 # JSON for scripts/tools
-kusto database list --cluster help --format json
+kusto database list --cluster https://help.kusto.windows.net --format json
 
 # Markdown for docs/issues
-kusto query "StormEvents | take 3" --cluster help --database Samples --format markdown
+kusto query "StormEvents | take 3" --cluster https://help.kusto.windows.net --database Samples --format markdown
 
 # CSV for redirecting query results
-kusto query "StormEvents | summarize EventCount = count() by State | top 10 by EventCount desc" --cluster help --database Samples --format csv > top-states.csv
+kusto query "StormEvents | summarize EventCount = count() by State | top 10 by EventCount desc" --cluster https://help.kusto.windows.net --database Samples --format csv > top-states.csv
 ```
 
 Human and markdown output show a short `Open in Web Explorer` link when available instead of printing the raw `webExplorerUrl`; JSON output still includes `webExplorerUrl`, and `--show-stats` adds `statistics`. CSV output is query-only and writes just the tabular result data to stdout, so `--chart` and `--show-stats` are rejected with `--format csv`.
@@ -467,7 +467,7 @@ Human and markdown output show a short `Open in Web Explorer` link when availabl
 - Use `--log-level` to emit console logs in addition to file logs.
 
 ```powershell
-kusto query "StormEvents | take 1" --cluster help --database Samples --log-level Information
+kusto query "StormEvents | take 1" --cluster https://help.kusto.windows.net --database Samples --log-level Information
 ```
 
 ## Installer script
@@ -629,7 +629,7 @@ The GitHub workflows install or configure the required toolchains for CI. When p
 ## Run from source
 
 ```powershell
-.\kusto --query "StormEvents | take 5" --cluster help --database Samples
+.\kusto query "StormEvents | take 5" --cluster https://help.kusto.windows.net --database Samples
 ```
 
 ## Publish the native executable locally
