@@ -45,6 +45,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Validate installer architecture in Windows PowerShell 5.1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/Test-InstallerArchitecture.ps1
+      - name: Validate installer architecture in PowerShell 7
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/Test-InstallerArchitecture.ps1
       - name: Build
         uses: ./.github/actions/build
       - name: Test
