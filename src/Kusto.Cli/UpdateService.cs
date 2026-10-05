@@ -150,6 +150,14 @@ internal sealed class UpdateService(
                     extractedDirectory,
                     cancellationToken);
             }
+            else if (OperatingSystem.IsMacOS()
+                && !update.IsDevBuild
+                && !skipProvenance)
+            {
+                await _provenanceVerifier.VerifyMacOSPayloadAsync(
+                    extractedDirectory,
+                    cancellationToken);
+            }
 
             await ValidateExtractedVersionAsync(
                 extractedExecutable,

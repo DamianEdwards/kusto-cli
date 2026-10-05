@@ -15,6 +15,9 @@ NO_EXECUTE=false
 MINIMUM_COSIGN_VERSION="2.4.0"
 COSIGN_VERSION=""
 COSIGN_VERIFY_ARGS=(--type slsaprovenance1)
+MACOS_SIGNING_TEAM_ID="7B8Z7H3R6G"
+VERIFY_MACOS_PAYLOAD=""
+MACOS_PAYLOAD_FILES=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -32,6 +35,10 @@ while [[ $# -gt 0 ]]; do
         --skip-provenance) SKIP_PROVENANCE=true; shift ;;
         --verbose) VERBOSE=true; shift ;;
         --no-execute) NO_EXECUTE=true; shift ;;
+        --verify-macos-payload)
+            [[ $# -ge 3 ]] || { echo "Error: macOS payload verification requires a directory and file list." >&2; exit 1; }
+            VERIFY_MACOS_PAYLOAD="$2"; shift 2
+            MACOS_PAYLOAD_FILES=("$@"); break ;;
         -h|--help)
             cat <<'HELP'
 install-kusto-cli.sh — Linux and macOS installer for kusto
@@ -42,7 +49,7 @@ Options:
   --target-path <path>               Install directory (default: ~/.kusto/bin)
   --no-update-path                   Do not update the shell profile PATH
   --repository <owner/repo>          GitHub repository
-  --skip-provenance                  Explicitly skip archive attestation verification
+  --skip-provenance                  Explicitly skip attestation and macOS signature verification
   --verbose                          Enable verbose diagnostics
 HELP
             exit 0 ;;
@@ -389,6 +396,53 @@ validate_payload_manifest() {
         die "payload-manifest.json does not exactly describe the extracted payload; the manifest itself must be excluded."
 }
 
+is_macos_native_file() {
+    local magic
+    magic=$(od -An -N4 -tx1 "$1" | tr -d ' \r\n') ||
+        die "Could not inspect native payload '$1'."
+    case "$magic" in
+        feedface|cefaedfe|feedfacf|cffaedfe|cafebabe|bebafeca|cafebabf|bfbafeca) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+invoke_macos_codesign() {
+    /usr/bin/codesign "$@"
+}
+
+assert_macos_payload_signatures() {
+    local directory="$1" required relative file details
+    shift
+    [[ "$MACOS_SIGNING_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] ||
+        die "The installer does not contain a valid trusted Apple Developer team."
+    local requirement="=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"${MACOS_SIGNING_TEAM_ID}\""
+    for required in kusto libSkiaSharp.dylib libHarfBuzzSharp.dylib libsodium.dylib; do
+        [[ -f "${directory}/${required}" ]] &&
+            is_macos_native_file "${directory}/${required}" ||
+            die "Downloaded archive is missing required macOS native payload '$required'."
+    done
+    for relative in "$@"; do
+        file="${directory}/${relative}"
+        if [[ "$relative" == *.dylib ]] && ! is_macos_native_file "$file"; then
+            die "macOS native library '$relative' is not a valid Mach-O payload."
+        fi
+        if is_macos_native_file "$file"; then
+            invoke_macos_codesign --verify --strict --all-architectures --test-requirement "$requirement" "$file" >/dev/null 2>&1 ||
+                die "macOS signature verification failed for '$relative'. Expected a valid Developer ID Application signature from team ${MACOS_SIGNING_TEAM_ID}; the payload may be unsigned, corrupt, or signed by another developer."
+            details=$(invoke_macos_codesign --display --verbose=4 "$file" 2>&1) ||
+                die "Could not inspect the macOS signature for '$relative'."
+            printf '%s\n' "$details" | grep -Eq '^CodeDirectory .*flags=.*runtime' ||
+                die "macOS payload '$relative' was not signed with the hardened runtime."
+            printf '%s\n' "$details" | grep -Eq '^Timestamp=.+$' ||
+                die "macOS payload '$relative' does not contain a secure signing timestamp."
+            if printf '%s\n' "$details" | grep -Eq '^Timestamp=none$'; then
+                die "macOS payload '$relative' does not contain a secure signing timestamp."
+            fi
+            log_verbose "Verified Developer ID signature for '$relative' from team ${MACOS_SIGNING_TEAM_ID}."
+        fi
+    done
+}
+
 extract_archive_safely() {
     local archive="$1" destination="$2" entry normalized
     while IFS= read -r entry; do
@@ -629,7 +683,7 @@ install_kusto() {
     if [[ "$QUALITY" == Dev ]]; then
         echo "Skipping provenance verification for the unattested development build; checksums were verified."
     elif [[ "$SKIP_PROVENANCE" == true ]]; then
-        echo "Skipping provenance verification because --skip-provenance was explicitly supplied; checksums were verified."
+        echo "Skipping provenance and code-signature verification because --skip-provenance was explicitly supplied; checksums were verified."
     else
         local attestations_url attestations_path="${temp}/attestations.jsonl"
         attestations_url=$(release_asset_url "$release" attestations.jsonl)
@@ -643,6 +697,11 @@ install_kusto() {
     extract_archive_safely "$archive" "$extract"
     assert_payload_complete "$extract"
     validate_payload_manifest "$extract"
+    if [[ "$platform" == osx && "$QUALITY" != Dev && "$SKIP_PROVENANCE" != true ]]; then
+        local macos_files=() relative
+        while IFS= read -r relative; do macos_files+=("$relative"); done < <(jq -r '.files[]' "${extract}/payload-manifest.json")
+        status_step "Verifying macOS payload signatures" assert_macos_payload_signatures "$extract" "${macos_files[@]}"
+    fi
     chmod +x "${extract}/kusto"
     local smoke_path="${temp}/chart-self-test.png"
     "${extract}/kusto" _diag chart-self-test --output "$smoke_path" >/dev/null ||
@@ -675,6 +734,9 @@ install_kusto() {
     print_azure_cli_guidance "$platform"
 }
 
-if [[ "$NO_EXECUTE" != true ]]; then
+# The embedded self-updater supplies its already-validated manifest file list.
+if [[ -n "$VERIFY_MACOS_PAYLOAD" ]]; then
+    assert_macos_payload_signatures "$VERIFY_MACOS_PAYLOAD" "${MACOS_PAYLOAD_FILES[@]}"
+elif [[ "$NO_EXECUTE" != true ]]; then
     install_kusto
 fi

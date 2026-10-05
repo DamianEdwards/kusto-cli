@@ -118,6 +118,25 @@ internal sealed class ProvenanceVerifier(ILogger<ProvenanceVerifier> logger)
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+    public async Task VerifyMacOSPayloadAsync(
+        string payloadDirectory,
+        CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            throw new PlatformNotSupportedException(
+                "Developer ID payload verification is only available on macOS.");
+        }
+
+        var payloadFiles = PayloadInstaller.ValidateManifest(payloadDirectory);
+        await VerifyEmbeddedScriptAsync(
+            payloadDirectory,
+            isWindows: false,
+            payloadFiles,
+            cancellationToken);
+        _logger.LogInformation("Verified Developer ID signatures for macOS payload {Directory}", payloadDirectory);
+    }
+
     public async Task VerifyArchiveAttestationAsync(
         string archivePath,
         string repository,
@@ -192,39 +211,62 @@ internal sealed class ProvenanceVerifier(ILogger<ProvenanceVerifier> logger)
             $"GitHub provenance for '{Path.GetFileName(archivePath)}' did not match {repository}/.github/workflows/{TrustedReleaseWorkflowFile}@{sourceRef}.{detail}");
     }
 
-    private async Task VerifyAuthenticodeAsync(
+    private Task VerifyAuthenticodeAsync(
         string binaryPath,
         CancellationToken cancellationToken)
+        => VerifyEmbeddedScriptAsync(binaryPath, isWindows: true, [], cancellationToken);
+
+    private async Task VerifyEmbeddedScriptAsync(
+        string targetPath,
+        bool isWindows,
+        IReadOnlyList<string> payloadFiles,
+        CancellationToken cancellationToken)
     {
-        var script = ReadEmbeddedVerificationScript();
+        var verificationName = isWindows ? "Authenticode" : "macOS signature";
+        var script = ReadEmbeddedVerificationScript(
+            isWindows ? "verify-provenance.ps1" : "verify-macos-provenance.sh",
+            verificationName);
         var scriptPath = Path.Combine(
             Path.GetTempPath(),
-            $"kusto-verify-{Guid.NewGuid():N}.ps1");
+            $"kusto-verify-{Guid.NewGuid():N}.{(isWindows ? "ps1" : "sh")}");
 
         try
         {
             await File.WriteAllTextAsync(scriptPath, script, cancellationToken);
             var startInfo = new ProcessStartInfo
             {
-                FileName = GetWindowsPowerShellPath(),
+                FileName = isWindows ? GetWindowsPowerShellPath() : "/bin/bash",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
-            startInfo.ArgumentList.Add("-NoProfile");
-            startInfo.ArgumentList.Add("-NonInteractive");
-            startInfo.ArgumentList.Add("-ExecutionPolicy");
-            startInfo.ArgumentList.Add("Bypass");
-            startInfo.ArgumentList.Add("-File");
-            startInfo.ArgumentList.Add(scriptPath);
-            startInfo.ArgumentList.Add("-BinaryPath");
-            startInfo.ArgumentList.Add(binaryPath);
-            startInfo.Environment["PSModulePath"] = GetWindowsPowerShellModulePath();
+            if (isWindows)
+            {
+                startInfo.ArgumentList.Add("-NoProfile");
+                startInfo.ArgumentList.Add("-NonInteractive");
+                startInfo.ArgumentList.Add("-ExecutionPolicy");
+                startInfo.ArgumentList.Add("Bypass");
+                startInfo.ArgumentList.Add("-File");
+                startInfo.ArgumentList.Add(scriptPath);
+                startInfo.ArgumentList.Add("-BinaryPath");
+                startInfo.ArgumentList.Add(targetPath);
+                startInfo.Environment["PSModulePath"] = GetWindowsPowerShellModulePath();
+            }
+            else
+            {
+                startInfo.ArgumentList.Add(scriptPath);
+                startInfo.ArgumentList.Add("--verify-macos-payload");
+                startInfo.ArgumentList.Add(targetPath);
+                foreach (var file in payloadFiles)
+                {
+                    startInfo.ArgumentList.Add(file);
+                }
+            }
 
             using var process = Process.Start(startInfo)
                 ?? throw new UserFacingException(
-                    "Could not start Windows PowerShell for Authenticode verification.");
+                    $"Could not start {verificationName} verification.");
             var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
             var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
             using var timeoutSource =
@@ -235,11 +277,15 @@ internal sealed class ProvenanceVerifier(ILogger<ProvenanceVerifier> logger)
             {
                 await process.WaitForExitAsync(timeoutSource.Token);
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException)
             {
-                process.Kill();
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
                 await process.WaitForExitAsync(CancellationToken.None);
-                throw new UserFacingException("Authenticode verification timed out.");
+                cancellationToken.ThrowIfCancellationRequested();
+                throw new UserFacingException($"{verificationName} verification timed out.");
             }
 
             var stdout = await stdoutTask;
@@ -247,7 +293,7 @@ internal sealed class ProvenanceVerifier(ILogger<ProvenanceVerifier> logger)
             if (process.ExitCode != 0)
             {
                 throw new UserFacingException(
-                    GetVerificationError(stdout, stderr));
+                    GetVerificationError(stdout, stderr, verificationName));
             }
         }
         finally
@@ -259,7 +305,7 @@ internal sealed class ProvenanceVerifier(ILogger<ProvenanceVerifier> logger)
         }
     }
 
-    private static string GetVerificationError(string stdout, string stderr)
+    private static string GetVerificationError(string stdout, string stderr, string verificationName)
     {
         if (!string.IsNullOrWhiteSpace(stdout))
         {
@@ -278,7 +324,7 @@ internal sealed class ProvenanceVerifier(ILogger<ProvenanceVerifier> logger)
         }
 
         return string.IsNullOrWhiteSpace(stderr)
-            ? "Authenticode verification failed."
+            ? $"{verificationName} verification failed."
             : stderr.Trim();
     }
 
@@ -302,16 +348,16 @@ internal sealed class ProvenanceVerifier(ILogger<ProvenanceVerifier> logger)
             }
         };
 
-    private static string ReadEmbeddedVerificationScript()
+    internal static string ReadEmbeddedVerificationScript(string resourceSuffix, string verificationName)
     {
         var assembly = Assembly.GetExecutingAssembly();
         var resourceName = assembly.GetManifestResourceNames()
             .SingleOrDefault(name =>
-                name.EndsWith("verify-provenance.ps1", StringComparison.OrdinalIgnoreCase));
+                name.EndsWith(resourceSuffix, StringComparison.OrdinalIgnoreCase));
         if (resourceName is null)
         {
             throw new UserFacingException(
-                "This Windows build does not contain the Authenticode verifier.");
+                $"This build does not contain the {verificationName} verifier.");
         }
 
         using var stream = assembly.GetManifestResourceStream(resourceName)!;

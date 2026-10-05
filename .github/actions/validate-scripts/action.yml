@@ -1,5 +1,5 @@
 name: Validate scripts
-description: Validate PowerShell, shell, and C# file-based apps when related files change.
+description: Validate PowerShell, shell, Python helper tests, and C# file-based apps when related files change.
 
 outputs:
   should-run:
@@ -105,6 +105,11 @@ runs:
       if: steps.changes.outputs.should-run == 'true'
       shell: bash
       run: bash ./scripts/Test-UnixInstaller.sh
+
+    - name: Validate macOS signing and notarization behavior
+      if: steps.changes.outputs.should-run == 'true'
+      shell: bash
+      run: python3 -B -m unittest discover -s scripts -p 'test_*.py'
 
     - name: Build C# file-based apps
       if: steps.changes.outputs.should-run == 'true'

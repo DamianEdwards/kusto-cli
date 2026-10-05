@@ -112,4 +112,67 @@ if is_slsa_v1_provenance_bundle "${temp_root}/invalid-bundle.json"; then
     fail "A non-SLSA predicate should be rejected."
 fi
 
+macos_payload="${temp_root}/macos-payload"
+mkdir -p "${macos_payload}/native"
+macos_files=(kusto libSkiaSharp.dylib libHarfBuzzSharp.dylib libsodium.dylib native/helper LICENSE)
+for file in "${macos_files[@]}"; do
+    if [[ "$file" == LICENSE ]]; then
+        printf 'license\n' > "${macos_payload}/${file}"
+    else
+        printf '\317\372\355\376native-test' > "${macos_payload}/${file}"
+    fi
+done
+codesign_calls="${temp_root}/codesign-calls.txt"
+MOCK_SIGNATURE_MODE=valid
+invoke_macos_codesign() {
+    local argument last_argument=""
+    for argument in "$@"; do last_argument="$argument"; done
+    if [[ "$1" == --verify ]]; then
+        [[ "$*" == *"--all-architectures"* &&
+           "$*" == *"anchor apple generic"* &&
+           "$*" == *"1.2.840.113635.100.6.2.6"* &&
+           "$*" == *"1.2.840.113635.100.6.1.13"* &&
+           "$*" == *"subject.OU] = \"${MACOS_SIGNING_TEAM_ID}\""* ]] ||
+            fail "The codesign requirement must pin Apple, Developer ID Application, and our team for all architectures."
+        printf '%s\n' "$last_argument" >> "$codesign_calls"
+        case "$MOCK_SIGNATURE_MODE" in unsigned|tampered|wrong-team|wrong-certificate-type) return 1 ;; esac
+    else
+        if [[ "$MOCK_SIGNATURE_MODE" != no-runtime ]]; then
+            echo 'CodeDirectory v=20500 flags=0x10000(runtime)'
+        fi
+        if [[ "$MOCK_SIGNATURE_MODE" != no-timestamp ]]; then
+            echo 'Timestamp=Oct 4, 2026 at 12:00:00'
+        fi
+    fi
+}
+
+assert_macos_payload_signatures "$macos_payload" "${macos_files[@]}"
+[[ "$(wc -l < "$codesign_calls" | tr -d ' ')" == 5 ]] ||
+    fail "Every Mach-O file, including extensionless helpers, must be verified."
+grep -Fq '/native/helper' "$codesign_calls" ||
+    fail "Nested Mach-O helpers must not bypass signature verification."
+if grep -Fq '/LICENSE' "$codesign_calls"; then
+    fail "Non-native documents should not require code signatures."
+fi
+
+for mode in unsigned tampered wrong-team wrong-certificate-type no-runtime no-timestamp; do
+    MOCK_SIGNATURE_MODE="$mode"
+    if output=$(assert_macos_payload_signatures "$macos_payload" "${macos_files[@]}" 2>&1); then
+        fail "A macOS payload with '$mode' should fail signature verification."
+    fi
+    assert_contains "$output" "Error:"
+done
+
+MOCK_SIGNATURE_MODE=valid
+printf 'corrupt-library' > "${macos_payload}/future.dylib"
+if output=$(assert_macos_payload_signatures "$macos_payload" "${macos_files[@]}" future.dylib 2>&1); then
+    fail "Corrupt optional native libraries must not bypass signature verification."
+fi
+assert_contains "$output" "not a valid Mach-O payload"
+rm -f "${macos_payload}/libsodium.dylib"
+if output=$(assert_macos_payload_signatures "$macos_payload" "${macos_files[@]}" 2>&1); then
+    fail "Missing macOS native sidecars should fail before execution."
+fi
+assert_contains "$output" "libsodium.dylib"
+
 echo "Unix installer validation passed."

@@ -207,10 +207,70 @@ jobs:
           path: ./artifacts/signed-windows-assets/*
           retention-days: 7
 
+  sign-macos:
+    name: Sign and notarize macOS (${{ matrix.rid }})
+    needs: [prepare-release]
+    if: needs.prepare-release.outputs.release_exists != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            rid: osx-x64
+          - runner: macos-latest
+            rid: osx-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Download unsigned release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-unsigned-bundle
+          path: ./artifacts/bundle
+      - name: Sign and notarize macOS payload
+        id: sign
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: |
+          python3 ./scripts/sign-macos-release.py \
+            --bundle-directory ./artifacts/bundle \
+            --output-directory ./artifacts/signed-macos-assets \
+            --diagnostics-directory ./artifacts/macos-notarization \
+            --runtime-identifier '${{ matrix.rid }}'
+      - name: Retain notarization submission IDs and status
+        if: ${{ always() && steps.sign.outcome != 'skipped' && steps.sign.outcome != '' }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: macos-notarization-${{ matrix.rid }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ./artifacts/macos-notarization/*
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Smoke-test signed packaged archive
+        shell: pwsh
+        run: ./scripts/Test-PackagedArchive.ps1 -RuntimeIdentifier '${{ matrix.rid }}' -Version '${{ needs.prepare-release.outputs.version }}' -ArtifactsDirectory './artifacts/signed-macos-assets' -SkipPublish
+      - name: Upload signed and notarized macOS asset
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: release-signed-macos-${{ matrix.rid }}
+          path: ./artifacts/signed-macos-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
   publish-release:
     runs-on: ubuntu-latest
-    needs: [prepare-release, sign-windows]
-    if: ${{ always() && needs.prepare-release.result == 'success' && (needs.sign-windows.result == 'success' || needs.sign-windows.result == 'skipped') }}
+    needs: [prepare-release, sign-windows, sign-macos]
+    if: ${{ always() && needs.prepare-release.result == 'success' && (needs.prepare-release.outputs.release_exists == 'true' || (needs.sign-windows.result == 'success' && needs.sign-macos.result == 'success')) }}
     permissions:
       attestations: write
       contents: write
@@ -236,11 +296,19 @@ jobs:
         with:
           name: release-signed-windows-assets
           path: ./artifacts/signed-windows-assets
-      - name: Overlay signed Windows assets and regenerate metadata
+      - name: Download signed and notarized macOS assets
+        if: needs.prepare-release.outputs.release_exists != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: release-signed-macos-*
+          merge-multiple: true
+          path: ./artifacts/signed-macos-assets
+      - name: Overlay signed assets and regenerate metadata
         if: needs.prepare-release.outputs.release_exists != 'true'
         shell: pwsh
         run: |
           Copy-Item './artifacts/signed-windows-assets/*' './artifacts/release' -Force
+          Copy-Item './artifacts/signed-macos-assets/*' './artifacts/release' -Force
           dotnet ./scripts/update-release-bundle-metadata.cs -- --bundle-directory './artifacts/release'
       - name: Verify final bundle
         if: needs.prepare-release.outputs.release_exists != 'true'

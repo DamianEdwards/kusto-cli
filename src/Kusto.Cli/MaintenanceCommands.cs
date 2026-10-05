@@ -132,7 +132,7 @@ internal static class MaintenanceCommands
         var skipProvenanceOption = new Option<bool>("--skip-provenance-checks")
         {
             Description =
-                "Skip Authenticode or GitHub attestation verification. Checksums are still required."
+                "Skip code-signature and GitHub attestation verification. Checksums are still required."
         };
         var dryRunOption = new Option<bool>("--dry-run")
         {

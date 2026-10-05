@@ -16,6 +16,11 @@ The release system is built around these invariants:
   attestations must all agree.
 - Official Windows payloads fail closed unless every executable file is
   Authenticode signed and verified.
+- Official macOS payloads fail closed unless every Mach-O executable/library is
+  Developer ID Application signed with the hardened runtime and a secure
+  timestamp, and Apple accepts notarization for both architectures.
+- The macOS installer and self-updater verify each extracted native signature
+  against the expected Apple Developer team before executing downloaded code.
 - Official Linux and macOS archives are verified against a tag-bound Sigstore
   attestation before extraction or execution.
 - Install and self-update operations replace only manifest-managed files,
@@ -66,6 +71,7 @@ when dispatching `publish-release.yml`.
 `.github/workflows/pr.yml` runs:
 
 - change-aware PowerShell, shell, and C# file-app validation
+- credential-free macOS signing/notarization helper tests
 - the solution build and Linux x64 NativeAOT validation
 - tests on Windows, Linux, and macOS
 - NativeAOT validation on Windows x64, Linux ARM64, and macOS ARM64
@@ -130,23 +136,41 @@ dispatches `release.yml` on that exact tag.
 CI run again, downloads the promotable bundle, and performs the official
 publication:
 
-1. The `production` environment gates the Windows signing job.
+1. The `production` environment gates the Windows and macOS signing jobs.
 2. Azure Artifact Signing signs every Windows executable payload:
    - `kusto.exe`
    - `libSkiaSharp.dll`
    - `libHarfBuzzSharp.dll`
    - `libsodium.dll`
 3. The workflow verifies every signature and signer issuer chain.
-4. Signed Windows archives replace their unsigned CI equivalents.
-5. Checksums and release metadata are regenerated.
-6. `actions/attest` creates tag-bound attestations for all six final archives.
-7. The action's uncompressed JSONL bundle is published as
+4. macOS jobs sign every Mach-O file, including `kusto`, `libSkiaSharp.dylib`,
+   `libHarfBuzzSharp.dylib`, and `libsodium.dylib`, with the same Developer ID
+   Application identity, hardened runtime, and secure timestamp. Each job
+   verifies the target architecture and every signature.
+5. Each macOS payload is submitted to Apple as a temporary ZIP. Only an
+   `Accepted` notarization result permits repacking the existing `.tar.gz`
+   download. Native Intel and ARM64 runners smoke-test their signed archives,
+   including the native chart-rendering stack.
+6. Signed Windows and notarized macOS archives replace their unsigned CI
+   equivalents. Neither job rebuilds the CLI or changes the payload manifest.
+7. Checksums and release metadata are regenerated.
+8. `actions/attest` creates tag-bound attestations for all six final archives.
+9. The action's uncompressed JSONL bundle is published as
    `attestations.jsonl` for portable offline verification.
-8. GitHub generates release notes from `.github/release.yml`.
-9. The workflow advances `release-state`.
+10. GitHub generates release notes from `.github/release.yml`.
+11. The workflow advances `release-state`.
 
-Signing is mandatory. Missing Azure settings fail the workflow rather than
-publishing an unsigned official Windows release.
+Signing is mandatory. Missing Azure or Apple settings, invalid identities,
+signature failures, notarization failures/timeouts, or signed-archive smoke-test
+failures prevent official release publication. Dev CI and PR builds do not use
+Apple credentials and remain unsigned.
+
+The macOS helper uses an isolated temporary Keychain, preserves other user
+Keychain search entries, and removes the temporary Keychain and credential files
+on exit. Notarization submission IDs, status responses, and available rejection
+logs are retained for 90 days in
+`macos-notarization-<rid>-<run-id>-<attempt>` Actions artifacts; these artifacts
+never contain the P12 or API private key.
 
 If release publication succeeded but state advancement did not, rerunning
 `release.yml` on the same tag verifies the existing release, checksums, source
@@ -182,6 +206,9 @@ undeclared, or unsafe paths. The manifest is intentionally forward-compatible:
 later releases may add or remove managed files without changing a hard-coded
 updater allowlist. Official Windows releases sign and verify every declared
 `.exe` and `.dll`.
+
+macOS download names and payload contents remain unchanged. ZIPs are only
+temporary notarization transport artifacts, not additional release assets.
 
 ## Trust model
 
@@ -222,6 +249,48 @@ https://github.com/DamianEdwards/kusto-cli/.github/workflows/release.yml@refs/ta
 Publishing the portable bundle avoids depending on GitHub's compressed
 `bundle_url` response format at install time.
 
+macOS adds Apple's Developer ID signatures and notarization to this existing
+attestation policy; it does not replace Sigstore verification. All native
+sidecars share the executable's signing identity so hardened-runtime library
+validation does not require disabling library validation. NativeAOT does not
+require JIT entitlements, and the workflow adds no permissive entitlements.
+
+After attestation and manifest verification, the Unix installer and self-updater
+check every declared Mach-O file before invoking its version command or chart
+diagnostic. The policy requires a valid signature on every architecture, an
+Apple trust anchor, a Developer ID Application certificate, the expected
+developer team **`7B8Z7H3R6G`**, the hardened-runtime flag, and a secure timestamp.
+This is the team on the verified `ghcp-spend-tray` release certificate, which
+matches that project's configured signing fingerprint. Missing required native
+sidecars, unsigned/modified files, other developers, and other Apple certificate
+types are rejected.
+
+The Unix installer is the source of truth: its `MACOS_SIGNING_TEAM_ID` constant
+and verification functions are embedded verbatim as `verify-macos-provenance.sh`
+in the CLI. The self-updater runs the embedded verification entry point using
+its already-validated manifest file list, without requiring `jq`, Python,
+Xcode, or a separately downloaded verification script. Release signing also
+checks this same policy before submitting to Apple. Certificate renewal within
+the same team does not require changing the trust pin; moving to another
+developer team requires a deliberate installer/CLI trust-policy migration,
+not merely changing a GitHub variable.
+
+These checks verify the code signature locally; they do not perform an online
+notarization lookup or invoke `spctl` as if the CLI were an app bundle.
+Notarization acceptance is a release gate, and the tag-bound attestation covers
+the final archive. Gatekeeper remains responsible for any separate system
+notarization assessment.
+
+Bare command-line executables, ZIPs, and tarballs cannot have notarization
+tickets stapled to them. Apple records tickets for the submitted signed code;
+Gatekeeper may need network access to obtain those tickets when assessing a
+quarantined download. This pipeline does not promise offline Gatekeeper
+assessment, ship a stapled DMG/installer, remove quarantine, or bypass system
+security policy. This follows Apple's
+[custom notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow),
+which explicitly documents that standalone binaries receive tickets but cannot
+have them stapled.
+
 Dev builds intentionally skip signature/attestation verification because they
 are produced before official promotion. Checksum and release metadata
 verification still run.
@@ -249,8 +318,10 @@ kusto config --set include_prerelease_updates=true
 ```
 
 Checksums and metadata are always required. `--skip-provenance-checks` exists
-for an explicitly trusted local test source; it does not disable checksum
-verification. `KUSTO_DISABLE_SELF_UPDATES=1` disables update checks.
+for an explicitly trusted local test source; it skips code-signature and
+attestation checks, but does not disable checksum verification. The Unix
+installer's `--skip-provenance` has the same explicit scope.
+`KUSTO_DISABLE_SELF_UPDATES=1` disables update checks.
 
 Versions through `0.3.1` use the earlier fixed payload allowlist. If a later
 release adds runtime files, users of those versions must run the current
@@ -318,12 +389,13 @@ The `production` environment allows:
 - `install-scripts-v*` tags
 
 It has a required reviewer and currently permits administrator bypass. Release
-tag creation, Windows signing, installer signing, and installer snapshot
+tag creation, Windows/macOS signing, installer signing, and installer snapshot
 attestation all use this environment as appropriate.
 
 ### Required environment secrets
 
-All six values are mandatory for official releases and installer publication:
+These six Azure values remain mandatory for official releases and installer
+publication:
 
 - `AZURE_CLIENT_ID`
 - `AZURE_TENANT_ID`
@@ -334,6 +406,75 @@ All six values are mandatory for official releases and installer publication:
 
 Azure holds the signing key material. GitHub stores only the identifiers used
 for OIDC login and Azure Artifact Signing.
+
+### Apple signing and notarization setup
+
+Use the same credential names and authentication scheme as
+[`DamianEdwards/ghcp-spend-tray`](https://github.com/DamianEdwards/ghcp-spend-tray).
+Configure the following under **Settings > Environments > production** in
+`DamianEdwards/kusto-cli`. Environment secrets are recommended so production
+approval gates access to the private keys; repository secrets with the same
+names also work if permitted by your policy.
+
+| Name | GitHub setting | Value |
+| --- | --- | --- |
+| `MACOS_CERTIFICATE_P12` | Secret | Base64 of an exported **Developer ID Application** certificate together with its matching private key (`.p12`). |
+| `MACOS_CERTIFICATE_PASSWORD` | Secret | Password used to encrypt/export that P12. |
+| `MACOS_SIGNING_IDENTITY` | Variable | Exact certificate name, such as `Developer ID Application: Name (TEAMID)`, or its 40-character SHA-1 fingerprint. |
+| `MACOS_NOTARY_KEY` | Secret | Full, unencoded contents of the App Store Connect **team API key** `.p8` file, including the PEM header/footer and newlines. |
+| `MACOS_NOTARY_KEY_ID` | Secret | Key ID for that same API key. |
+| `MACOS_NOTARY_ISSUER` | Secret | Issuer ID (UUID) for the App Store Connect team API key, not the Apple Developer Team ID. |
+
+All six Apple settings are required for official macOS releases. They are mapped
+to same-named environment variables only during the signing step. Installer
+publication and ordinary CI do not require them. No `APPLE_ID`,
+app-specific password, `MACOS_TEAM_ID`, provisioning profile, or Developer ID
+Installer certificate is required by this workflow.
+The certificate must belong to the pinned team `7B8Z7H3R6G`. Its identity can
+change on renewal, but the team cannot be overridden through environment
+variables. The signing helper rejects a certificate from another team before
+producing release assets.
+
+1. Have an active [Apple Developer Program](https://developer.apple.com/programs/)
+   membership with permission to issue Developer ID certificates. In
+   [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/certificates/list),
+   create a **Developer ID Application** certificate using a certificate signing
+   request generated on your Mac, or reuse the valid certificate used by
+   `ghcp-spend-tray` if appropriate for the same developer/team.
+2. Install the certificate on the Mac that generated its private key. In
+   **Keychain Access > login > My Certificates**, confirm the certificate expands
+   to show its private key, then export the certificate and private key as a
+   password-protected `.p12`. A downloaded `.cer`, an Apple Development
+   certificate, or an intermediate CA certificate is not sufficient. Keep the
+   default Apple certificate trust settings.
+3. Create or reuse an authorized **team API key** in
+   **App Store Connect > Users and Access > Integrations > App Store Connect API**.
+   Retain its Key ID and Issuer ID, and securely save the downloaded `.p8` file
+   (Apple only permits downloading the private key once). Individual API keys
+   are not supported here because this workflow always supplies `--issuer`.
+4. Add the secrets and variable to `production`. The existing environment must
+   continue to allow `main` and `v*` tags, with required review configured.
+   Configure the values separately in this repository; GitHub cannot export
+   another repository's existing secret values.
+
+Example configuration commands, run locally with the original credential files
+(do not commit or print the P12 or P8 contents):
+
+```bash
+base64 < DeveloperIDApplication.p12 | tr -d '\r\n' |
+  gh secret set MACOS_CERTIFICATE_P12 --repo DamianEdwards/kusto-cli --env production
+gh secret set MACOS_CERTIFICATE_PASSWORD --repo DamianEdwards/kusto-cli --env production
+gh variable set MACOS_SIGNING_IDENTITY --repo DamianEdwards/kusto-cli --env production \
+  --body 'Developer ID Application: Name (TEAMID)'
+gh secret set MACOS_NOTARY_KEY --repo DamianEdwards/kusto-cli --env production < AuthKey_KEYID.p8
+gh secret set MACOS_NOTARY_KEY_ID --repo DamianEdwards/kusto-cli --env production
+gh secret set MACOS_NOTARY_ISSUER --repo DamianEdwards/kusto-cli --env production
+```
+
+The commands without a supplied value prompt for it. The signing identity can
+also be found with `security find-identity -v -p codesigning` on your Mac; use
+the identity corresponding to the exported P12. Keep certificate rotation and
+API-key revocation synchronized with these GitHub settings.
 
 ### Rulesets
 
@@ -352,6 +493,8 @@ creation and updates to that actor.
 ### Repository variables
 
 - `DEFAULT_POST_RELEASE_PHASE=rtm`
+- `MACOS_SIGNING_IDENTITY` (prefer the `production` environment variable described
+  above; a repository variable with the same name is also supported)
 
 ## Maintainer procedures
 
@@ -379,6 +522,17 @@ Then merge a change or dispatch `ci.yml` to produce artifacts from that state.
 5. Approve the production signing deployment in **Finalize App Release**.
 6. Confirm the release, attestations, and release-state advancement.
 
+Both macOS signing jobs and Windows signing must succeed before a new release
+can be attested or published.
+
+For the initial rollout, publish the first signed/notarized **stable** CLI
+release before publishing the stricter Unix installer. Historical unsigned
+official macOS releases will fail the new installer's signature checks; only
+Dev builds and the explicit provenance-bypass flags skip them. Existing older
+CLI installations can acquire the first signed release using their existing
+attestation-based updater, and then subsequent updates enforce the Apple
+signature policy too.
+
 **Finalize App Release** normally starts automatically. If tag dispatch fails
 after the tag is pushed, run it manually on the existing tag with the original
 CI run ID and phase. Do not recreate the tag.
@@ -386,6 +540,27 @@ CI run ID and phase. Do not recreate the tag.
 Promote a CI run whose source commit contains the current workflow files.
 GitHub correctly rejects a workflow token attempting to create a tag at an
 older commit when that operation would introduce different workflow content.
+
+### Recover a notarization failure or timeout
+
+Download the failed job's `macos-notarization-<rid>-<run-id>-<attempt>` artifact
+and inspect `<rid>-submission.json` for the submission ID. Apple can continue
+processing after the helper's 60-minute wait expires, particularly for a team's
+first submissions. A timeout is not a rejection or cancellation. Check the
+existing submission before starting another release attempt:
+
+```bash
+xcrun notarytool info '<submission-id>' --key AuthKey_KEYID.p8 \
+  --key-id '<key-id>' --issuer '<issuer-uuid>' --output-format json
+xcrun notarytool log '<submission-id>' --key AuthKey_KEYID.p8 \
+  --key-id '<key-id>' --issuer '<issuer-uuid>' notarization-log.json
+```
+
+An `Invalid` result must be investigated using the retained rejection log or
+`notarytool log`. Fix credential/certificate configuration or the reported
+payload issue before retrying. A workflow rerun signs and submits fresh
+payloads; it does not resume an old submission or publish unsigned artifacts.
+Use the existing release tag and original CI run ID, never recreate the tag.
 
 ### Publish installers
 
@@ -429,6 +604,24 @@ Expand-Archive .\kusto-win-x64.zip .\kusto-win-x64
   -InstallerScriptPath .\scripts\install\install-kusto-cli.ps1
 ```
 
+Verify macOS payload signatures after downloading and verifying the archive
+attestation:
+
+```bash
+mkdir -p kusto-osx-arm64
+tar -xzf kusto-osx-arm64.tar.gz -C kusto-osx-arm64
+for file in kusto-osx-arm64/kusto kusto-osx-arm64/*.dylib; do
+  codesign --verify --strict --verbose=2 "$file"
+  codesign --display --verbose=4 "$file"
+done
+./kusto-osx-arm64/kusto _diag chart-self-test --output /tmp/kusto-chart.png
+```
+
+Signature details should show the expected `Developer ID Application` authority
+and TeamIdentifier `7B8Z7H3R6G`, the `runtime` flag, and a secure Timestamp.
+Notarization is confirmed by the retained `Accepted` status for each submission;
+`codesign --verify` alone does not verify notarization.
+
 Exercise negative provenance cases:
 
 ```powershell
@@ -460,6 +653,8 @@ Release support is implemented by:
 - `scripts/update-release-bundle-metadata.cs`
 - `scripts/expand-windows-release-assets.cs`
 - `scripts/compress-windows-release-assets.cs`
+- `scripts/sign-macos-release.py`
+- `scripts/test_macos_signing.py`
 - `scripts/write-install-scripts-manifest.cs`
 - `scripts/version.cs`
 - `scripts/publish-branch-content.sh`

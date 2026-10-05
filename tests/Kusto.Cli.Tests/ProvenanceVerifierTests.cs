@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Kusto.Cli.Tests;
 
@@ -117,6 +119,56 @@ public sealed class ProvenanceVerifierTests
             "libSkiaSharp.dll",
             "native/msalruntime.dll"
         ], files);
+    }
+
+    [Fact]
+    public void MacOSVerifier_EmbedsTheExactInstallerTrustPolicy()
+    {
+        var embedded = ProvenanceVerifier.ReadEmbeddedVerificationScript(
+            "verify-macos-provenance.sh",
+            "macOS signature");
+        var directory = AppContext.BaseDirectory;
+        while (directory is not null)
+        {
+            var installer = Path.Combine(directory, "scripts", "install", "install-kusto-cli.sh");
+            if (File.Exists(installer))
+            {
+                Assert.Equal(File.ReadAllText(installer), embedded);
+                Assert.Contains("MACOS_SIGNING_TEAM_ID=\"7B8Z7H3R6G\"", embedded, StringComparison.Ordinal);
+                return;
+            }
+            directory = Path.GetDirectoryName(directory);
+        }
+
+        throw new FileNotFoundException("Could not locate the Unix installer trust policy.");
+    }
+
+    [Fact]
+    public async Task VerifyMacOSPayloadAsync_RejectsUnsignedNativePayloadBeforeExecution()
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        using var fixture = new ProvenanceFixture();
+        var files = new[] { "kusto", "libHarfBuzzSharp.dylib", "libSkiaSharp.dylib", "libsodium.dylib" };
+        foreach (var file in files)
+        {
+            File.WriteAllBytes(Path.Combine(fixture.Root, file), [0xcf, 0xfa, 0xed, 0xfe, 0, 0, 0, 0]);
+        }
+        File.Delete(fixture.ArchivePath);
+        File.Delete(fixture.ChecksumsPath);
+        File.WriteAllText(
+            Path.Combine(fixture.Root, "payload-manifest.json"),
+            JsonSerializer.Serialize(new { files }));
+        var verifier = new ProvenanceVerifier(NullLogger<ProvenanceVerifier>.Instance);
+
+        var exception = await Assert.ThrowsAsync<UserFacingException>(
+            () => verifier.VerifyMacOSPayloadAsync(fixture.Root, CancellationToken.None));
+
+        Assert.Contains("macOS signature verification failed", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("7B8Z7H3R6G", exception.Message, StringComparison.Ordinal);
     }
 
     private sealed class ProvenanceFixture : IDisposable

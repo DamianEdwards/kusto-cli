@@ -577,6 +577,7 @@ Installer behavior:
 - Always verifies archive SHA256 and release metadata, including development builds
 - Requires Authenticode trust for `kusto.exe` and every native executable sidecar in official Windows releases
 - Requires tag-bound GitHub artifact attestations for official macOS/Linux archives
+- On macOS, also verifies every native payload's Developer ID Application signature, expected developer team, hardened runtime, and secure timestamp before running it
 - Installs the complete payload transactionally and updates PATH plus shell completion setup
 
 ## Self-update and completions
@@ -671,7 +672,7 @@ The release system is split into narrowly scoped workflows:
 - `ci.yml` runs on main pushes or manual dispatch, calculates versions, publishes six development and six promotable archives, creates a versioned development prerelease, and advances `release-state`.
 - `bump-version.yml` moves the release state between `pre`, `rc`, and `rtm`.
 - **Start App Release** (`publish-release.yml`) is the normal manual entry point for an app release. It validates a successful `main` CI run, creates its annotated version tag, and dispatches finalization.
-- **Finalize App Release** (`release.yml`) runs automatically after **Start App Release**. It promotes the exact prebuilt bundle without rebuilding, requires production approval, signs every Windows executable payload, attests final archives, publishes generated release notes, and advances release state. Run it manually only to recover a failed dispatch after the release tag was created.
+- **Finalize App Release** (`release.yml`) runs automatically after **Start App Release**. It promotes the exact prebuilt bundle without rebuilding, requires production approval, signs every Windows executable payload, Developer ID signs and notarizes both macOS payloads, attests final archives, publishes generated release notes, and advances release state. Run it manually only to recover a failed dispatch after the release tag was created.
 - **Start Install Script Release** (`install-scripts.yml`) is the normal manual entry point for publishing the installers. It signs and snapshots both installers to the protected `install-scripts` branch.
 - **Finalize Install Script Release** (`attest-install-scripts.yml`) runs automatically after **Start Install Script Release**. It attests the immutable installer snapshot and publishes its non-latest release. Run it manually only to recover a failed dispatch on the generated snapshot tag.
 - `releases-cleanup.yml` retains a configurable number of development and installer snapshots.
@@ -708,7 +709,7 @@ Release assets are intentionally shaped for stable download URLs and easy platfo
 - Linux/macOS: tarballs such as `kusto-linux-x64.tar.gz`
 - Archive contents: `kusto[.exe]`, required SkiaSharp/HarfBuzzSharp/libsodium native sidecars, license/notices, and `payload-manifest.json`
 - Bundles always include `checksums.txt` and `release-metadata.json`
-- `release.yml` signs every Windows executable payload, regenerates hashes/metadata, and attests all final archives before publishing
+- `release.yml` signs every Windows executable payload and every macOS Mach-O executable/library, requires Apple notarization for both macOS architectures, regenerates hashes/metadata, and attests all final archives before publishing
 
 If you want to generate the same release-shaped outputs locally, use the helper scripts instead of calling `dotnet publish` directly:
 
