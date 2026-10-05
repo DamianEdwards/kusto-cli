@@ -4,7 +4,7 @@ A native command-line tool for Azure Data Explorer (Kusto), focused on quick exp
 
 ## Install now on Windows
 
-In a PowerShell terminal:
+In a Windows PowerShell 5.1 or PowerShell 7 terminal (x64 or ARM64 Windows):
 
 ```PowerShell
 irm https://kusto.damianedwards.dev/install.ps1 | iex

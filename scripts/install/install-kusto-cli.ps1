@@ -375,11 +375,26 @@ function Get-ReleaseAssetDownloadUri
 
 function Get-WindowsArchitecture
 {
-    $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    # Avoid PSReadLine's RuntimeInformation shim in Windows PowerShell 5.1.
+    # PROCESSOR_ARCHITEW6432 identifies the native OS when the shell is emulated.
+    $arch = if (-not [string]::IsNullOrWhiteSpace($env:PROCESSOR_ARCHITEW6432))
+    {
+        $env:PROCESSOR_ARCHITEW6432
+    }
+    else
+    {
+        $env:PROCESSOR_ARCHITECTURE
+    }
+
+    if ([string]::IsNullOrWhiteSpace($arch))
+    {
+        throw 'Unable to determine Windows architecture from PROCESSOR_ARCHITEW6432 or PROCESSOR_ARCHITECTURE. Only x64 and arm64 are supported.'
+    }
+
     switch ($arch)
     {
-        ([System.Runtime.InteropServices.Architecture]::X64) { return 'x64' }
-        ([System.Runtime.InteropServices.Architecture]::Arm64) { return 'arm64' }
+        'AMD64' { return 'x64' }
+        'ARM64' { return 'arm64' }
         default { throw "Unsupported Windows architecture '$arch'. Only x64 and arm64 are supported." }
     }
 }
