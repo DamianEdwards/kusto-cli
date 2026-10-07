@@ -1,9 +1,48 @@
 using System.Security.Cryptography;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Kusto.Cli.Tests;
 
 public sealed class ProvenanceVerifierTests
 {
+    [Fact]
+    public async Task PlatformGuards_RejectUnsupportedVerificationBeforeOpeningFiles()
+    {
+        var verifier = new ProvenanceVerifier(NullLogger<ProvenanceVerifier>.Instance);
+        if (OperatingSystem.IsWindows())
+        {
+            var exception = await Assert.ThrowsAsync<PlatformNotSupportedException>(
+                () => verifier.VerifyArchiveAttestationAsync(
+                    "missing.zip", "owner/repo", "refs/tags/v1.0.0", "missing.jsonl", CancellationToken.None));
+            Assert.Contains("Unix", exception.Message, StringComparison.Ordinal);
+        }
+        else
+        {
+            var exception = await Assert.ThrowsAsync<PlatformNotSupportedException>(
+                () => verifier.VerifyWindowsPayloadAsync("missing-directory", CancellationToken.None));
+            Assert.Contains("Windows", exception.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task PlatformGuards_PreserveSupportedVerificationInputChecks()
+    {
+        var verifier = new ProvenanceVerifier(NullLogger<ProvenanceVerifier>.Instance);
+        var missingPath = Path.Combine(Path.GetTempPath(), $"kusto-missing-{Guid.NewGuid():N}");
+        if (OperatingSystem.IsWindows())
+        {
+            await Assert.ThrowsAsync<UserFacingException>(
+                () => verifier.VerifyWindowsPayloadAsync(missingPath, CancellationToken.None));
+        }
+        else
+        {
+            var exception = await Assert.ThrowsAsync<UserFacingException>(
+                () => verifier.VerifyArchiveAttestationAsync(
+                    missingPath, "owner/repo", "refs/tags/v1.0.0", missingPath, CancellationToken.None));
+            Assert.Contains("attestation bundle", exception.Message, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public void VerifyChecksum_AcceptsMatchingHash()
     {

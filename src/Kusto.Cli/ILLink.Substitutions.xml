@@ -1,0 +1,20 @@
+<linker>
+  <assembly fullname="Kusto.Language">
+    <type fullname="Kusto.Language.Binding.Binder">
+      <!-- QueryValidator uses KustoCode.Parse, never ParseAndAnalyze or Analyze.
+           The shared Create method still roots binding behind its analyze parameter. -->
+      <method signature="System.Boolean TryBind(Kusto.Language.Syntax.SyntaxTree,Kusto.Language.GlobalState,Kusto.Language.Binding.LocalBindingCache,System.Action`2&lt;Kusto.Language.Syntax.SyntaxNode,Kusto.Language.Binding.SemanticInfo&gt;,Kusto.Language.Utils.CancellationToken)" body="remove" />
+    </type>
+  </assembly>
+  <assembly fullname="Hex1b">
+    <type fullname="Hex1b.Hex1bAppOptions">
+      <!-- The renderers use the default options and never enable surface pooling. -->
+      <method signature="System.Boolean get_EnableSurfacePooling()" body="stub" value="false" />
+    </type>
+    <type fullname="Hex1b.ConsolePresentationAdapter">
+      <!-- Both CLI renderers use WithHeadless().WithHex1bApp(), which replaces
+           the builder's default presentation factory and supplies a workload adapter. -->
+      <method signature="System.Void .ctor(System.Boolean,System.Boolean)" body="remove" />
+    </type>
+  </assembly>
+</linker>

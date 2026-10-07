@@ -14,7 +14,6 @@ internal sealed class ProvenanceVerifier(ILogger<ProvenanceVerifier> logger)
     private const string TrustedReleaseWorkflowFile = "release.yml";
     private static readonly TimeSpan VerificationTimeout = TimeSpan.FromSeconds(60);
     private readonly ILogger<ProvenanceVerifier> _logger = logger;
-    private readonly SigstoreVerifier _sigstoreVerifier = new();
 
     public static string GetExpectedSha256(string checksumsPath, string assetName)
     {
@@ -93,7 +92,7 @@ internal sealed class ProvenanceVerifier(ILogger<ProvenanceVerifier> logger)
             $"release-metadata.json does not contain '{assetName}'.");
     }
 
-    public async Task VerifyWindowsPayloadAsync(
+    public Task VerifyWindowsPayloadAsync(
         string payloadDirectory,
         CancellationToken cancellationToken)
     {
@@ -103,6 +102,13 @@ internal sealed class ProvenanceVerifier(ILogger<ProvenanceVerifier> logger)
                 "Authenticode payload verification is only available on Windows.");
         }
 
+        return VerifyWindowsPayloadCoreAsync(payloadDirectory, cancellationToken);
+    }
+
+    private async Task VerifyWindowsPayloadCoreAsync(
+        string payloadDirectory,
+        CancellationToken cancellationToken)
+    {
         var payloadFiles = PayloadInstaller.ValidateManifest(payloadDirectory);
         foreach (var fileName in GetWindowsExecutablePayloadFileNames(payloadFiles))
         {
@@ -118,7 +124,25 @@ internal sealed class ProvenanceVerifier(ILogger<ProvenanceVerifier> logger)
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-    public async Task VerifyArchiveAttestationAsync(
+    public Task VerifyArchiveAttestationAsync(
+        string archivePath,
+        string repository,
+        string sourceRef,
+        string bundlePath,
+        CancellationToken cancellationToken)
+    {
+        // A guard inside an async state machine cannot prune its resume paths.
+        if (OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException(
+                "Archive attestation verification is only available on Unix.");
+        }
+
+        return VerifyArchiveAttestationCoreAsync(
+            archivePath, repository, sourceRef, bundlePath, cancellationToken);
+    }
+
+    private async Task VerifyArchiveAttestationCoreAsync(
         string archivePath,
         string repository,
         string sourceRef,
@@ -155,6 +179,7 @@ internal sealed class ProvenanceVerifier(ILogger<ProvenanceVerifier> logger)
             TrustedReleaseWorkflowFile,
             sourceRef);
         var failures = new List<string>();
+        var sigstoreVerifier = new SigstoreVerifier();
 
         foreach (var bundleJson in bundleLines.Where(line => !string.IsNullOrWhiteSpace(line)))
         {
@@ -163,7 +188,7 @@ internal sealed class ProvenanceVerifier(ILogger<ProvenanceVerifier> logger)
                 var bundle = SigstoreBundle.Deserialize(bundleJson);
                 await using var artifactStream = File.OpenRead(archivePath);
                 var (success, result) =
-                    await _sigstoreVerifier.TryVerifyStreamAsync(artifactStream, bundle, policy);
+                    await sigstoreVerifier.TryVerifyStreamAsync(artifactStream, bundle, policy);
                 if (success)
                 {
                     _logger.LogInformation(

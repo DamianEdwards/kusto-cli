@@ -10,8 +10,10 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <PublishAot>true</PublishAot>
+    <EnableLinkerSubstitutions Condition="'$(EnableLinkerSubstitutions)' == ''">true</EnableLinkerSubstitutions>
     <OptimizationPreference>Size</OptimizationPreference>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages Condition="'$(InvariantGlobalization)' == 'true'">en</SatelliteResourceLanguages>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Company>Damian Edwards</Company>
     <Product>Kusto CLI</Product>
@@ -33,6 +35,12 @@
     <PackageReference Include="ScottPlot" Version="5.1.58" />
     <PackageReference Include="Sigstore" Version="0.5.0" />
     <PackageReference Include="System.CommandLine" Version="2.0.3" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(PublishAot)' == 'true' and '$(EnableLinkerSubstitutions)' == 'true'">
+    <IlcArg Include="--substitution:$(MSBuildThisFileDirectory)ILLink.Substitutions.xml" />
+    <!-- XML-only edits must invalidate incremental native publishes too. -->
+    <CustomAdditionalCompileInputs Include="ILLink.Substitutions.xml" />
   </ItemGroup>
 
   <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
