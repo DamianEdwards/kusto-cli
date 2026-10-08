@@ -117,6 +117,16 @@ public sealed class JwtTokenClaimsTests
     }
 
     [Fact]
+    public void Validate_KustoResourceApplicationIdAudience_Succeeds()
+    {
+        var token = WamTestSupport.CreateJwt(
+            WamTestSupport.TenantId,
+            WamConstants.ExpectedResourceApplicationId);
+
+        JwtTokenClaims.Validate(token, WamTestSupport.TenantId, WamConstants.ExpectedResource);
+    }
+
+    [Fact]
     public void Validate_WrongTenant_Throws()
     {
         var token = WamTestSupport.CreateJwt("22222222-2222-2222-2222-222222222222", WamConstants.ExpectedResource);

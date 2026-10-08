@@ -102,6 +102,24 @@ public sealed class WamTokenProviderTests
     }
 
     [Fact]
+    public async Task GetTokenAsync_KustoResourceApplicationIdAudience_ReturnsToken()
+    {
+        var jwt = WamTestSupport.CreateJwt(
+            WamTestSupport.TenantId,
+            WamConstants.ExpectedResourceApplicationId);
+        var store = new FakeAuthenticationRecordStore { RecordToReturn = WamTestSupport.CreateRecord() };
+        var factory = new FakeBrokerCredentialFactory
+        {
+            OnGetToken = _ => new AccessToken(jwt, DateTimeOffset.UtcNow.AddHours(1))
+        };
+        var provider = Create(new FakePlatform(true), new FakeMetadataProvider(), store, factory);
+
+        var token = await provider.GetTokenAsync(WamTestSupport.WamCluster(), CancellationToken.None);
+
+        Assert.Equal(jwt, token);
+    }
+
+    [Fact]
     public async Task GetTokenAsync_TokenBoundToWrongTenant_Throws()
     {
         var jwt = WamTestSupport.CreateJwt("22222222-2222-2222-2222-222222222222", WamConstants.ExpectedResource);
