@@ -102,6 +102,12 @@ CI, `bump-version.yml`, and `release.yml` use the same `release-state`
 concurrency group with `queue: max`. This serializes every state writer without
 discarding pending runs.
 
+Rerunning CI leaves an already-published Dev release unchanged when its tag
+targets the same source commit. A tag targeting a different commit remains an
+error; draft releases can still be completed. The state update compares the
+current `release-state` with the state used to calculate the run's versions,
+so a rerun cannot roll back state advanced by a successful earlier run.
+
 ### Promotion dispatcher
 
 **Start App Release** (`.github/workflows/publish-release.yml`) is the

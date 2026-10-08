@@ -106,6 +106,11 @@ runs:
       shell: bash
       run: bash ./scripts/Test-UnixInstaller.sh
 
+    - name: Validate dev release reruns
+      if: steps.changes.outputs.should-run == 'true'
+      shell: bash
+      run: bash ./scripts/Test-DevRelease.sh
+
     - name: Build C# file-based apps
       if: steps.changes.outputs.should-run == 'true'
       shell: bash

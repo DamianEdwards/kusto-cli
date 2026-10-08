@@ -281,9 +281,22 @@ jobs:
         with:
           fetch-depth: 0
       - name: Publish next release state
+        env:
+          EXPECTED_STATE: ${{ needs.version.outputs.state_json }}
         shell: bash
         run: |
           set -euo pipefail
+          RELEASE_STATE_REF=$(git ls-remote --heads origin release-state)
+          if [ -n "$RELEASE_STATE_REF" ]; then
+            git fetch origin release-state
+            CURRENT_STATE=$(git show origin/release-state:version-state.json | jq -S -c '.')
+            EXPECTED_STATE=$(printf '%s\n' "$EXPECTED_STATE" | jq -S -c '.')
+            if [ "$CURRENT_STATE" != "$EXPECTED_STATE" ]; then
+              echo "::notice::Release state has already advanced since this CI run calculated its version; leaving it unchanged."
+              exit 0
+            fi
+          fi
+
           mkdir -p ./artifacts/release-state
           printf '%s\n' '${{ needs.version.outputs.next_state }}' |
             jq -R 'split("|") | {base: .[0], phase: .[1], phaseNumber: (.[2] | tonumber), devNumber: (.[3] | tonumber), pending: .[4]}' \
