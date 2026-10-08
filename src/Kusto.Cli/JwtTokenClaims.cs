@@ -104,6 +104,14 @@ internal static class JwtTokenClaims
             return true;
         }
 
+        // Kusto may identify this resource by its application ID; do not treat other
+        // resource audiences as interchangeable with their application IDs.
+        if (string.Equals(normalizedResource, WamConstants.ExpectedResource, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(normalizedAudience, WamConstants.ExpectedResourceApplicationId, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         // Tolerate audience expressed as a bare host or with a differing scheme by
         // comparing hosts when both parse as absolute URIs.
         if (Uri.TryCreate(normalizedAudience, UriKind.Absolute, out var audienceUri) &&

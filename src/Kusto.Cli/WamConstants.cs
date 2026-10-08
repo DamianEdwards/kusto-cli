@@ -16,6 +16,12 @@ internal static class WamConstants
     /// <summary>The only Kusto service resource accepted from cluster auth metadata.</summary>
     public const string ExpectedResource = "https://kusto.kusto.windows.net";
 
+    /// <summary>
+    /// Application ID emitted in the <c>aud</c> claim for tokens requested for
+    /// <see cref="ExpectedResource"/>.
+    /// </summary>
+    public const string ExpectedResourceApplicationId = "2746ea77-4702-4b45-80ca-3c97e680e8b7";
+
     /// <summary>Scope suffix appended to the resource to request a token via the broker.</summary>
     public const string DefaultScopeSuffix = "/.default";
 

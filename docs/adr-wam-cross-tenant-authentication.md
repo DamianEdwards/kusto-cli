@@ -97,7 +97,9 @@ Before using the metadata, the CLI verifies that:
 - The advertised client application ID is a valid GUID.
 
 Tokens are requested for the advertised Kusto resource using its `/.default`
-scope.
+scope. Entra may express the resulting token audience as either that resource
+URI or the Kusto resource application ID
+`2746ea77-4702-4b45-80ca-3c97e680e8b7`; both forms are validated.
 
 ## Configuration and local state
 
