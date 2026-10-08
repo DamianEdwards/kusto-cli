@@ -21,7 +21,7 @@ ${DESCRIPTION}
 EOF
 )
 
-if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
+if is_draft=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.draft' 2>&1); then
   tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.sha')
   tag_type=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.type')
   if [[ "$tag_type" == "tag" ]]; then
@@ -32,9 +32,19 @@ if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
     exit 1
   fi
 
+  if [[ "$is_draft" == "false" ]]; then
+    echo "::notice::Dev release ${TAG} is already published for ${GITHUB_SHA}; leaving its notes and assets unchanged."
+    exit 0
+  fi
+
   gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease --latest=false --title "$TAG" --notes "$NOTES"
   gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "${BUNDLE_DIR}"/* --clobber
 else
+  if [[ "$is_draft" != *"(HTTP 404)"* ]]; then
+    echo "::error::Unable to inspect Dev release ${TAG}: ${is_draft}"
+    exit 1
+  fi
+
   gh release create "$TAG" \
     --repo "$GITHUB_REPOSITORY" \
     --target "$GITHUB_SHA" \
