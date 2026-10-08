@@ -719,6 +719,76 @@ dotnet .\scripts\merge-release-bundle.cs -- --input-directory .\artifacts\local-
 
 ## NativeAOT prerequisites
 
+### Size optimizations
+
+NativeAOT publishes use `src/Kusto.Cli/ILLink.Substitutions.xml`, passed directly
+to ILC via `--substitution`. It replaces two unused dependency entry points with
+throws (not silent default returns), and makes one default setting constant:
+
+- Kusto's semantic `Binder.TryBind`: validation calls `KustoCode.Parse`, never
+  `ParseAndAnalyze` or `Analyze`. Syntax errors and management-command parsing
+  remain supported; name/type resolution is left to the server.
+- Hex1b's interactive `ConsolePresentationAdapter` constructor: text and chart
+  rendering always use `WithHeadless().WithHex1bApp()`. Console output and ANSI
+  formatting remain supported without opening an interactive Hex1b console.
+- Hex1b's `EnableSurfacePooling` getter: pooling is disabled by default and the
+  renderers never enable it, so the getter can return constant `false`.
+
+These assumptions must be revisited before adding semantic analysis or
+interactive terminal rendering, or enabling surface pooling. Dependency upgrades
+must preserve the exact member signatures and defaults; unit tests check them.
+The XML is also a compile input so XML-only edits invalidate incremental
+native publishes. Packaged smoke tests run
+`kusto _diag trimming-self-test` against the native binary on each tested platform.
+Authentication and provenance verification are not substituted.
+
+`ProvenanceVerifier` keeps OS guards in non-async, Task-returning wrappers.
+Guards inside async state machines can leave unreachable resume paths rooted.
+The Sigstore verifier is constructed only inside the Unix attestation
+implementation, allowing Windows to trim Sigstore/TUF without changing either
+platform's trust checks. Linux retains the attestation verifier.
+
+Invariant-globalization builds select only English satellite resources through
+`SatelliteResourceLanguages`, avoiding unused translations. Disabling invariant
+globalization leaves the language selection unrestricted.
+
+For a comparison publish, use `-p:EnableLinkerSubstitutions=false`. Generate size
+diagnostics with `-p:IlcGenerateMstatFile=true -p:IlcGenerateDgmlFile=true`, preserve
+the baseline `.mstat` from `artifacts/obj/Kusto.Cli/<configuration>_<rid>/native`,
+then compare it with a substitutions-enabled publish using `sizoscope-cli`.
+Use `-p:SatelliteResourceLanguages=` to disable the satellite filter as well.
+Measure the final executable as well as the complete payload excluding debug
+symbols; required native sidecars are unchanged.
+
+An October 2026 `win-x64` Release investigation with SDK 10.0.401 / runtime
+10.0.12 measured the following successive changes:
+
+| Stage | Executable size | Saved in this step |
+| --- | ---: | ---: |
+| Initial baseline, substitutions disabled | 20,682,240 bytes | - |
+| Syntax-only binding and headless console substitutions | 19,831,808 bytes | 850,432 bytes |
+| Non-async provenance platform guards and deferred Sigstore construction | 18,872,832 bytes | 958,976 bytes |
+| Constant-disabled surface pooling | 18,851,840 bytes | 20,992 bytes |
+| Invariant-mode satellite resource filter | 18,793,472 bytes | 58,368 bytes |
+
+The cumulative executable reduction was 1,888,768 bytes (9.13%). The executable
+plus native DLLs decreased from 37,191,328 to 35,302,560 bytes (5.08%).
+
+A separate `linux-x64` comparison of the latest source with substitutions and
+satellite filtering disabled/enabled measured 23,008,768 vs 22,022,512 bytes
+(986,256 bytes, 4.29%). This comparison does not measure the platform-guard
+refactor's contribution. These measurements are not guarantees for other
+architectures or future dependency versions.
+
+For further investigation, rank both methods/types and resources in the
+`.mstat`, trace their retaining callers using source or the `.scan.dgml.xml`,
+and measure candidates individually. A large dependency is not necessarily
+unused: Kusto's command grammar/function names, MSAL's XML-based federation
+support, and SkiaSharp's native chart rendering still implement supported
+features. Do not remove them solely because they are large.
+
+### Platform toolchains
+
 NativeAOT publishing needs platform-specific native toolchains in addition to the .NET SDK:
 
 - Windows: Visual Studio C++ tools / Desktop development with C++ (ARM64 publishing also needs ARM64 C++ tools)

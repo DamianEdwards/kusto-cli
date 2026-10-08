@@ -8,6 +8,8 @@
 #      valid PNG via the hidden `_diag chart-self-test` command. This catches
 #      DllNotFoundException-class failures that succeeded against the build
 #      output but explode when run from the archive payload.
+#   4. Syntax parsing and headless text/charts pass `_diag trimming-self-test`
+#      with NativeAOT linker substitutions applied.
 #
 # The test does not need network access, Kusto auth, or a live cluster — it
 # exercises the same SkiaSharp/HarfBuzz native loading path that real chart
@@ -174,6 +176,13 @@ try
     if ($platform -ne 'win')
     {
         & chmod +x $binaryPath
+    }
+
+    Write-Host "Running '$binaryPath _diag trimming-self-test'..." -ForegroundColor Cyan
+    & $binaryPath '_diag' 'trimming-self-test'
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "Trimming self-test exited with code $LASTEXITCODE. Syntax parsing or headless rendering failed in the archived payload."
     }
 
     $smokePngPath = Join-Path $expandRoot 'self-test.png'
