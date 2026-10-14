@@ -304,12 +304,18 @@ internal sealed class UpdateService(
         }
     }
 
-    private static void ThrowIfDisabled()
+    internal static bool IsDisabled
     {
-        var value = Environment.GetEnvironmentVariable(
-            AppIdentity.DisableSelfUpdatesEnvVar);
-        if (value is not null
-            && value.Trim().ToLowerInvariant() is "1" or "true" or "yes" or "on")
+        get
+        {
+            var value = Environment.GetEnvironmentVariable(AppIdentity.DisableSelfUpdatesEnvVar);
+            return value?.Trim().ToLowerInvariant() is "1" or "true" or "yes" or "on";
+        }
+    }
+
+    internal static void ThrowIfDisabled()
+    {
+        if (IsDisabled)
         {
             throw new UserFacingException(
                 $"Self-update is disabled by {AppIdentity.DisableSelfUpdatesEnvVar}.");

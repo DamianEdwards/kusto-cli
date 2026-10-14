@@ -2,6 +2,14 @@ namespace Kusto.Cli.Tests;
 
 public sealed class ConsoleStylingTests
 {
+    [Theory]
+    [InlineData(true, "\u001b[33mUpdate available\u001b[0m")]
+    [InlineData(false, "Update available")]
+    public void ColorizeWarning_RespectsAnsiSupport(bool useAnsi, string expected)
+    {
+        Assert.Equal(expected, ConsoleStyle.ColorizeWarning("Update available", useAnsi));
+    }
+
     [Fact]
     public void ColorizeError_WithAnsiEnabled_UsesRed()
     {

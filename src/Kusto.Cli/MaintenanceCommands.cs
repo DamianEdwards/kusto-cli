@@ -119,6 +119,10 @@ internal static class MaintenanceCommands
         {
             Description = "Check without downloading or installing."
         };
+        var backgroundOption = new Option<bool>("--background")
+        {
+            Hidden = true
+        };
         var preReleaseOption = new Option<bool>("--pre-release")
         {
             Description = "Include official prerelease versions."
@@ -140,18 +144,26 @@ internal static class MaintenanceCommands
         };
 
         command.Options.Add(checkOption);
+        command.Options.Add(backgroundOption);
         command.Options.Add(preReleaseOption);
         command.Options.Add(stableOnlyOption);
         command.Options.Add(skipProvenanceOption);
         command.Options.Add(dryRunOption);
         command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var requestedLogLevel = CliRunner.ParseLogLevelToken(
+            var background = parseResult.GetValue(backgroundOption);
+            var requestedLogLevel = background ? null : CliRunner.ParseLogLevelToken(
                 parseResult.GetValue(logLevelOption));
             using var loggerFactory = LoggingFactoryBuilder.Create(requestedLogLevel);
             var logger = loggerFactory.CreateLogger("Update");
             try
             {
+                if (background && !parseResult.GetValue(checkOption))
+                {
+                    throw new UserFacingException("--background requires --check.");
+                }
+
+                UpdateService.ThrowIfDisabled();
                 var usePreRelease = parseResult.GetValue(preReleaseOption);
                 var stableOnly = parseResult.GetValue(stableOnlyOption);
                 if (usePreRelease && stableOnly)
@@ -175,11 +187,27 @@ internal static class MaintenanceCommands
                     stateStore,
                     loggerFactory.CreateLogger<UpdateService>());
 
-                Console.Out.WriteLine("Checking for updates...");
-                var update = await service.CheckForUpdateAsync(
-                    allowPreRelease,
-                    stableOnly,
-                    cancellationToken);
+                var cache = new UpdateCheckCache(AppPaths.GetUpdateCheckPath(), logger);
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                if (background)
+                {
+                    timeout.CancelAfter(TimeSpan.FromSeconds(30));
+                }
+                else
+                {
+                    Console.Out.WriteLine("Checking for updates...");
+                }
+
+                var update = parseResult.GetValue(dryRunOption) && !background
+                    ? await service.CheckForUpdateAsync(allowPreRelease, stableOnly, timeout.Token)
+                    : await cache.CheckAsync(
+                        ct => service.CheckForUpdateAsync(allowPreRelease, stableOnly, ct),
+                        background,
+                        timeout.Token);
+                if (background)
+                {
+                    return 0;
+                }
                 if (update is null)
                 {
                     Console.Out.WriteLine("kusto is up to date.");
@@ -225,7 +253,10 @@ internal static class MaintenanceCommands
             catch (Exception ex)
             {
                 logger.LogError(ex, "Update command failed");
-                Console.Error.WriteLine($"kusto: {ErrorMapper.Map(ex)}");
+                if (!background)
+                {
+                    Console.Error.WriteLine($"kusto: {ErrorMapper.Map(ex)}");
+                }
                 return 1;
             }
         });
