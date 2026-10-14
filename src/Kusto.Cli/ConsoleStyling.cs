@@ -34,6 +34,7 @@ internal static class ConsoleRendering
 internal static class ConsoleStyle
 {
     private const string Red = "\u001b[31m";
+    private const string Yellow = "\u001b[33m";
     private const string LightGray = "\u001b[37m";
     private const string Reset = "\u001b[0m";
 
@@ -46,6 +47,9 @@ internal static class ConsoleStyle
     {
         return useAnsi ? $"{LightGray}{message}{Reset}" : message;
     }
+
+    public static string ColorizeWarning(string message, bool useAnsi)
+        => useAnsi ? $"{Yellow}{message}{Reset}" : message;
 }
 
 internal static class ConsoleOutput

@@ -112,6 +112,7 @@ internal static class PayloadInstaller
             Directory.Delete(backupDirectory, recursive: true);
             Directory.Delete(stagedDirectory, recursive: true);
             stateStore.Clear();
+            new UpdateCheckCache(AppPaths.GetUpdateCheckPath(), logger).Clear();
             logger.LogInformation(
                 "Installed Kusto CLI update {Version}",
                 state.AvailableVersion);
@@ -188,6 +189,8 @@ internal static class PayloadInstaller
         startInfo.ArgumentList.Add(stateStore.LockPath);
         startInfo.ArgumentList.Add("-ResultPath");
         startInfo.ArgumentList.Add(resultPath);
+        startInfo.ArgumentList.Add("-CheckPath");
+        startInfo.ArgumentList.Add(AppPaths.GetUpdateCheckPath());
 
         return Process.Start(startInfo)
             ?? throw new UserFacingException(
@@ -390,7 +393,8 @@ internal static class PayloadInstaller
             [Parameter(Mandatory)][string]$BackupDirectory,
             [Parameter(Mandatory)][string]$StatePath,
             [Parameter(Mandatory)][string]$LockPath,
-            [Parameter(Mandatory)][string]$ResultPath
+            [Parameter(Mandatory)][string]$ResultPath,
+            [Parameter(Mandatory)][string]$CheckPath
         )
 
         $ErrorActionPreference = 'Stop'
@@ -528,7 +532,30 @@ internal static class PayloadInstaller
             Remove-Item -LiteralPath $BackupDirectory -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $StagedDirectory -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $StatePath -Force -ErrorAction SilentlyContinue
-            @{ success = $true } | ConvertTo-Json -Compress | Set-Content -Path $ResultPath
+            $checkLock = $null
+            $cacheResetError = $null
+            try
+            {
+                $checkLock = [System.IO.FileStream]::new(
+                    ($CheckPath + '.lock'),
+                    [System.IO.FileMode]::OpenOrCreate,
+                    [System.IO.FileAccess]::ReadWrite,
+                    [System.IO.FileShare]::None)
+                [System.IO.File]::Delete($CheckPath)
+            }
+            catch [System.IO.IOException]
+            {
+                $cacheResetError = $_.Exception.Message
+            }
+            catch [System.UnauthorizedAccessException]
+            {
+                $cacheResetError = $_.Exception.Message
+            }
+            finally
+            {
+                if ($null -ne $checkLock) { $checkLock.Dispose() }
+            }
+            @{ success = $true; cacheResetError = $cacheResetError } | ConvertTo-Json -Compress | Set-Content -Path $ResultPath
         }
         catch
         {

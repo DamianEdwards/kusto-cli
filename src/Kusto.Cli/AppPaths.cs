@@ -31,6 +31,9 @@ internal static class AppPaths
     public static string GetUpdateLockPath()
         => Path.Combine(GetAppHomeDirectory(), ".update-lock");
 
+    public static string GetUpdateCheckPath()
+        => Path.Combine(GetAppHomeDirectory(), "update-check");
+
     private static string ExpandUserProfile(string path)
     {
         if (!path.StartsWith('~'))

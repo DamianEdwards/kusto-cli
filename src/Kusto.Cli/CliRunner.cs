@@ -51,10 +51,12 @@ public static class CliRunner
             return 1;
         }
 
-        using var runtime = CreateRuntime(logLevel);
+        var runtime = CreateRuntime(logLevel);
+        var updateChecker = BackgroundUpdateChecker.Create(runtime.Logger);
 
         try
         {
+            updateChecker?.TryStart();
             var output = await commandAction(runtime, cancellationToken);
             var renderedOutput = runtime.OutputFormatter.Format(output, format);
             if (!string.IsNullOrWhiteSpace(renderedOutput))
@@ -69,6 +71,16 @@ public static class CliRunner
             runtime.Logger.LogError(ex, "Command execution failed.");
             ConsoleOutput.WriteError(ErrorMapper.Map(ex));
             return 1;
+        }
+        finally
+        {
+            var notice = updateChecker?.GetNotice();
+            runtime.Dispose();
+            if (notice is not null)
+            {
+                Console.Error.WriteLine(ConsoleStyle.ColorizeWarning(
+                    notice, ConsoleRendering.ShouldUseAnsiForStandardError()));
+            }
         }
     }
 

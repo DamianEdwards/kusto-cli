@@ -594,6 +594,10 @@ kusto completions script pwsh
 
 Stable installations consider stable updates by default. Official prerelease installations can advance to newer official prereleases or RTM, and development builds can advance to any newer channel. Set `KUSTO_DISABLE_SELF_UPDATES=1` to disable update checks. `KUSTO_UPDATE_REPOSITORY` overrides the GitHub repository; `KUSTO_UPDATE_SOURCE` points to a local release bundle for testing. A local Unix source requires explicit `--skip-provenance-checks`, but checksum and metadata verification still run.
 
+Normal commands launch a silent background update check at most once every six hours, without waiting for the network. When a newer version is known, a reminder with the version and update command is written to stderr after command output (yellow in interactive terminals); stdout remains unchanged for scripts. A newly discovered update may first be announced on the next command. Help, version, completions, internal diagnostics, and commands run through `dotnet` do not launch checks.
+
+The check cache is the `update-check` file in the Kusto profile directory (`KUSTO_HOME`, the directory containing `KUSTO_CONFIG_PATH`, or `~/.kusto`). Its last-write time tracks check attempts and its contents hold the newer version, if any. Concurrent checks use a separate, non-blocking lock; cache access failures never fail normal commands. Failed checks retain a previously discovered version and still wait six hours before retrying. Explicit `kusto update --check` bypasses the throttle and refreshes the cache; successful installation resets it. Installation/recovery state is stored separately.
+
 Updates validate the complete extracted payload before installation. Windows replacement runs in a detached helper after the active process exits; Unix replacement runs as a transactional file swap. Both retain a backup until the new binary passes the packaged `_diag chart-self-test` startup check, then remove it. Failed swaps restore the prior payload.
 
 ### Manually verify Windows provenance checks
