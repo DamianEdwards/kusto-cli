@@ -94,6 +94,25 @@ public static class CommandFactory
         });
 
         diagCommand.Add(chartSelfTest);
+        var trimmingSelfTest = new Command("trimming-self-test", "Verify syntax parsing and headless rendering in the published binary.")
+        {
+            Hidden = true
+        };
+        trimmingSelfTest.SetAction(async (_, cancellationToken) =>
+        {
+            try
+            {
+                await LinkerSubstitutionSelfTest.RunAsync(cancellationToken);
+                Console.Out.WriteLine("Trimming self-test passed.");
+                return 0;
+            }
+            catch (UserFacingException ex)
+            {
+                Console.Error.WriteLine($"kusto: {ex.Message}");
+                return 1;
+            }
+        });
+        diagCommand.Add(trimmingSelfTest);
         return diagCommand;
     }
 

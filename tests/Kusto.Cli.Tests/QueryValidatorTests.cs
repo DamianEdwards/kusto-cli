@@ -5,6 +5,10 @@ public sealed class QueryValidatorTests
     [Theory]
     [InlineData("print 1")]
     [InlineData("StormEvents | take 5")]
+    [InlineData("UnknownTable | where UnknownColumn > 0 | take 5")]
+    [InlineData("let events = datatable(value:long)[1, 2]; events | summarize sum(value)")]
+    [InlineData(".show tables")]
+    [InlineData(".show database ['Samples'] schema as json")]
     public void Validate_ValidQuery_DoesNotThrow(string query)
     {
         QueryValidator.Validate(query);
