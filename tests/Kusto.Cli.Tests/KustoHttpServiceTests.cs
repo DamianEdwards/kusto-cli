@@ -105,6 +105,288 @@ public sealed class KustoHttpServiceTests
     }
 
     [Fact]
+    public async Task ExecuteQueryAsync_OnCompletionError_RejectsPartialResults()
+    {
+        const string responseJson =
+            """
+            [
+              {
+                "FrameType": "DataTable",
+                "TableKind": "PrimaryResult",
+                "Columns": [{ "ColumnName": "Value", "ColumnType": "long" }],
+                "Rows": [[1]]
+              },
+              { "FrameType": "DataSetCompletion", "HasErrors": true }
+            ]
+            """;
+
+        var handler = new RecordingHandler(() => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson)
+        });
+        using var httpClient = new HttpClient(handler);
+        var service = new KustoHttpService(httpClient, new StaticTokenProvider("fake-token"), NullLogger<KustoHttpService>.Instance);
+
+        var exception = await Assert.ThrowsAsync<UserFacingException>(() =>
+            service.ExecuteQueryAsync(
+                new ResolvedCluster(null, "https://help.kusto.windows.net"),
+                "Samples",
+                "print Value=1",
+                includeStatistics: false,
+                CancellationToken.None));
+
+        Assert.Contains("results", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_OnInlineRowError_RejectsPartialResults()
+    {
+        const string responseJson =
+            """
+            [
+              {
+                "FrameType": "DataTable",
+                "TableKind": "PrimaryResult",
+                "Columns": [{ "ColumnName": "Value", "ColumnType": "long" }],
+                "Rows": [[1], { "error": { "code": "E_RUNAWAY_QUERY", "message": "private-diagnostic" } }]
+              }
+            ]
+            """;
+
+        var exception = await Assert.ThrowsAsync<UserFacingException>(() => ExecuteResponseAsync(responseJson));
+
+        Assert.Contains("results", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("private-diagnostic", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("""{ "FrameType": "DataSetCompletion", "HasErrors": false, "Cancelled": true }""")]
+    [InlineData("""{ "frametype": "datasetcompletion", "haserrors": true }""")]
+    [InlineData("""{ "FrameType": "DataSetCompletion", "HasErrors": false, "OneApiErrors": [{ "code": "E_QUERY_RESULT_SET_TOO_LARGE", "message": "private-diagnostic" }] }""")]
+    [InlineData("""{ "error": { "code": "E_RUNAWAY_QUERY", "message": "private-diagnostic" } }""")]
+    public async Task ExecuteQueryAsync_OnEmbeddedExecutionFailure_RejectsPartialResults(string errorFrame)
+    {
+        var responseJson =
+            $$"""
+            [
+              {
+                "FrameType": "DataTable",
+                "TableKind": "PrimaryResult",
+                "Columns": [{ "ColumnName": "Value", "ColumnType": "long" }],
+                "Rows": [[1]]
+              },
+              {{errorFrame}}
+            ]
+            """;
+
+        var exception = await Assert.ThrowsAsync<UserFacingException>(() => ExecuteResponseAsync(responseJson));
+
+        Assert.Contains("results", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("private-diagnostic", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false, false, 0)]
+    [InlineData(false, true, 1)]
+    [InlineData(false, false, 2)]
+    [InlineData(true, true, 0)]
+    [InlineData(true, false, 1)]
+    [InlineData(true, true, 2)]
+    public async Task ExecuteQueryAsync_OnFailedQueryStatus_RejectsPartialResults(bool v1, bool includeStatistics, int severity)
+    {
+        var tables =
+            $$"""
+            [
+              {
+                "FrameType": "DataTable",
+                "TableName": "PrimaryResult",
+                "TableKind": "PrimaryResult",
+                "Columns": [{ "ColumnName": "Value", "ColumnType": "long" }],
+                "Rows": [[1]]
+              },
+              {
+                "FrameType": "DataTable",
+                "TableName": "QueryStatus",
+                "TableKind": "QueryCompletionInformation",
+                "Columns": [
+                  { "ColumnName": "Severity", "ColumnType": "int" },
+                  { "ColumnName": "StatusDescription", "ColumnType": "string" }
+                ],
+                "Rows": [[{{severity}}, "private-diagnostic"]]
+              }
+            ]
+            """;
+        var responseJson = v1 ? $$"""{ "Tables": {{tables}} }""" : tables;
+
+        var exception = await Assert.ThrowsAsync<UserFacingException>(() => ExecuteResponseAsync(responseJson, includeStatistics));
+
+        Assert.Contains("results", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("private-diagnostic", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_OnNamedQueryStatusError_RejectsPartialResults()
+    {
+        const string responseJson =
+            """
+            [
+              {
+                "FrameType": "DataTable",
+                "TableKind": "PrimaryResult",
+                "Columns": [{ "ColumnName": "Value", "ColumnType": "long" }],
+                "Rows": [[1]]
+              },
+              {
+                "FrameType": "DataTable",
+                "TableKind": "QueryCompletionInformation",
+                "Columns": [{ "ColumnName": "SeverityName", "ColumnType": "string" }],
+                "Rows": [["Error"]]
+              }
+            ]
+            """;
+
+        await Assert.ThrowsAsync<UserFacingException>(() => ExecuteResponseAsync(responseJson));
+    }
+
+    [Theory]
+    [InlineData(false, 3)]
+    [InlineData(false, 6)]
+    [InlineData(true, 3)]
+    [InlineData(true, 6)]
+    public async Task ExecuteQueryAsync_OnNonFailureQueryStatus_PreservesResults(bool v1, int severity)
+    {
+        var tables =
+            $$"""
+            [
+              {
+                "FrameType": "DataTable",
+                "TableKind": "PrimaryResult",
+                "Columns": [{ "ColumnName": "Value", "ColumnType": "long" }],
+                "Rows": [[1]]
+              },
+              {
+                "FrameType": "DataTable",
+                "TableName": "QueryStatus",
+                "TableKind": "QueryCompletionInformation",
+                "Columns": [{ "ColumnName": "Severity", "ColumnType": "int" }],
+                "Rows": [[{{severity}}]]
+              }
+            ]
+            """;
+
+        var result = await ExecuteResponseAsync(v1 ? $$"""{ "Tables": {{tables}} }""" : tables);
+
+        Assert.Equal("1", Assert.Single(result.Table.Rows)[0]);
+    }
+
+    [Fact]
+    public async Task ExecuteManagementCommandAsync_OnFailedQueryStatus_RejectsPartialResults()
+    {
+        const string responseJson =
+            """
+            {
+              "Tables": [
+                {
+                  "TableKind": "PrimaryResult",
+                  "Columns": [{ "ColumnName": "DatabaseName", "DataType": "string" }],
+                  "Rows": [["Samples"]]
+                },
+                {
+                  "TableName": "QueryStatus",
+                  "Columns": [{ "ColumnName": "Severity", "DataType": "int" }],
+                  "Rows": [[2]]
+                }
+              ]
+            }
+            """;
+
+        var handler = new RecordingHandler(() => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson)
+        });
+        using var httpClient = new HttpClient(handler);
+        var service = new KustoHttpService(httpClient, new StaticTokenProvider("fake-token"), NullLogger<KustoHttpService>.Instance);
+
+        await Assert.ThrowsAsync<UserFacingException>(() =>
+            service.ExecuteManagementCommandAsync(
+                new ResolvedCluster(null, "https://help.kusto.windows.net"),
+                "Samples",
+                ".show databases",
+                null,
+                CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_WithPrimaryResultNamedQueryStatus_PreservesBusinessData()
+    {
+        const string responseJson =
+            """
+            [
+              {
+                "FrameType": "DataTable",
+                "TableKind": "PrimaryResult",
+                "TableName": "QueryStatus",
+                "Columns": [
+                  { "ColumnName": "Severity", "ColumnType": "int" },
+                  { "ColumnName": "SeverityName", "ColumnType": "string" }
+                ],
+                "Rows": [[1, "Error"]]
+              },
+              { "FrameType": "DataSetCompletion", "HasErrors": false, "Cancelled": false }
+            ]
+            """;
+
+        var result = await ExecuteResponseAsync(responseJson);
+
+        Assert.Equal(new string?[] { "1", "Error" }, Assert.Single(result.Table.Rows));
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_WithLegacyQueryStatus_RejectsPartialResults()
+    {
+        const string responseJson =
+            """
+            {
+              "Tables": [
+                {
+                  "TableName": "PrimaryResult",
+                  "Columns": [{ "ColumnName": "Value", "DataType": "long" }],
+                  "Rows": [[1]]
+                },
+                {
+                  "TableName": "QueryStatus",
+                  "Columns": [{ "ColumnName": "Severity", "DataType": "int" }],
+                  "Rows": [[2]]
+                }
+              ]
+            }
+            """;
+
+        await Assert.ThrowsAsync<UserFacingException>(() => ExecuteResponseAsync(responseJson));
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_WithErrorNamedBusinessData_PreservesResults()
+    {
+        const string responseJson =
+            """
+            [
+              {
+                "FrameType": "DataTable",
+                "TableKind": "PrimaryResult",
+                "Columns": [{ "ColumnName": "Error", "ColumnType": "dynamic" }],
+                "Rows": [[{ "error": "business-data", "HasErrors": true }]]
+              },
+              { "FrameType": "DataSetCompletion", "HasErrors": false, "Cancelled": false, "OneApiErrors": [] }
+            ]
+            """;
+
+        var result = await ExecuteResponseAsync(responseJson);
+
+        Assert.Contains("business-data", Assert.Single(result.Table.Rows)[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ExecuteQueryAsync_ExtractsVisualizationMetadataFromExtendedProperties()
     {
         var responseJson = JsonSerializer.Serialize(
@@ -597,6 +879,23 @@ public sealed class KustoHttpServiceTests
         Assert.Equal(
             adeUrl + "/v1/rest/mgmt",
             handler.LastRequestUri!.AbsoluteUri);
+    }
+
+    internal static async Task<QueryExecutionResult> ExecuteResponseAsync(string responseJson, bool includeStatistics = false)
+    {
+        var handler = new RecordingHandler(() => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson)
+        });
+        using var httpClient = new HttpClient(handler);
+        var service = new KustoHttpService(httpClient, new StaticTokenProvider("fake-token"), NullLogger<KustoHttpService>.Instance);
+
+        return await service.ExecuteQueryAsync(
+            new ResolvedCluster(null, "https://help.kusto.windows.net"),
+            "Samples",
+            "print Value=1",
+            includeStatistics,
+            CancellationToken.None);
     }
 
     private sealed class StaticTokenProvider(string token) : ITokenProvider

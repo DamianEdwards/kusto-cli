@@ -522,6 +522,13 @@ kusto query "StormEvents | summarize EventCount = count() by State | top 10 by E
 
 Human and markdown output show a short `Open in Web Explorer` link when available instead of printing the raw `webExplorerUrl`; JSON output still includes `webExplorerUrl`, and `--show-stats` adds `statistics`. CSV output is query-only and writes just the tabular result data to stdout, so `--chart` and `--show-stats` are rejected with `--format csv`.
 
+Kusto can report an execution failure after returning `200 OK` and some rows.
+The CLI rejects completion errors, cancellation, inline error rows, and failure
+records in query-status tables instead of returning partial results as success.
+These checks apply regardless of `--show-stats`; server diagnostic payloads are
+not included in the user-facing error. Any results from a failed request must
+not be used.
+
 ## Logging
 
 - Log file path (default): `%TEMP%\kusto\kusto.log`

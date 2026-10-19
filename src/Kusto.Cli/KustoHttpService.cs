@@ -8,6 +8,9 @@ namespace Kusto.Cli;
 
 public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider tokenProvider, ILogger<KustoHttpService> logger) : IKustoService
 {
+    private const string ExecutionFailureMessage =
+        "Kusto reported an execution failure or cancellation. The returned results must not be used.";
+
     private readonly HttpClient _httpClient = httpClient;
     private readonly ITokenProvider _tokenProvider = tokenProvider;
     private readonly ILogger<KustoHttpService> _logger = logger;
@@ -118,6 +121,8 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
 
     private static List<ParsedKustoTable> ParseTables(string responseBody)
     {
+        // Failures can arrive after HTTP 200; discard the entire result if the stream reports one.
+        // https://learn.microsoft.com/en-us/kusto/concepts/partial-query-failures
         try
         {
             using var document = JsonDocument.Parse(responseBody);
@@ -126,6 +131,7 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
 
             if (root.ValueKind == JsonValueKind.Object)
             {
+                ThrowIfExecutionFailed(root);
                 if (TryGetPropertyIgnoreCase(root, "Tables", out var tablesElement) && tablesElement.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var tableElement in tablesElement.EnumerateArray())
@@ -148,6 +154,7 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
                         continue;
                     }
 
+                    ThrowIfExecutionFailed(frame);
                     var frameType = GetStringProperty(frame, "FrameType");
                     if (!string.Equals(frameType, "DataTable", StringComparison.OrdinalIgnoreCase))
                     {
@@ -158,12 +165,68 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
                 }
             }
 
+            if (tables.Any(HasFailedQueryStatus))
+            {
+                throw new UserFacingException(ExecutionFailureMessage);
+            }
+
             return tables;
         }
         catch (JsonException ex)
         {
             throw new UserFacingException("Kusto returned an unexpected response format.", ex);
         }
+    }
+
+    private static void ThrowIfExecutionFailed(JsonElement element)
+    {
+        if (TryGetPropertyIgnoreCase(element, "error", out var error) &&
+            error.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+        {
+            throw new UserFacingException(ExecutionFailureMessage);
+        }
+
+        if (!string.Equals(GetStringProperty(element, "FrameType"), "DataSetCompletion", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        // Completion flags are part of the public v2 response contract.
+        // https://learn.microsoft.com/en-us/kusto/api/rest/response-v2#datasetcompletion
+        if ((TryGetPropertyIgnoreCase(element, "HasErrors", out var hasErrors) && hasErrors.ValueKind == JsonValueKind.True) ||
+            (TryGetPropertyIgnoreCase(element, "Cancelled", out var cancelled) && cancelled.ValueKind == JsonValueKind.True) ||
+            (TryGetPropertyIgnoreCase(element, "OneApiErrors", out var errors) &&
+                errors.ValueKind == JsonValueKind.Array && errors.GetArrayLength() > 0))
+        {
+            throw new UserFacingException(ExecutionFailureMessage);
+        }
+    }
+
+    private static bool HasFailedQueryStatus(ParsedKustoTable table)
+    {
+        var isStatusTable = string.Equals(table.TableKind, "QueryCompletionInformation", StringComparison.OrdinalIgnoreCase) ||
+            (string.IsNullOrEmpty(table.TableKind) && string.Equals(table.TableName, "QueryStatus", StringComparison.OrdinalIgnoreCase));
+        if (!isStatusTable)
+        {
+            return false;
+        }
+
+        for (var column = 0; column < table.Columns.Count; column++)
+        {
+            if (string.Equals(table.Columns[column], "Severity", StringComparison.OrdinalIgnoreCase) &&
+                table.Rows.Any(row => int.TryParse(row[column], out var severity) && severity <= 2))
+            {
+                return true;
+            }
+
+            if (string.Equals(table.Columns[column], "SeverityName", StringComparison.OrdinalIgnoreCase) &&
+                table.Rows.Any(row => string.Equals(row[column], "Error", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static ParsedKustoTable ParseTable(JsonElement tableElement)
@@ -194,6 +257,11 @@ public sealed class KustoHttpService(HttpClient httpClient, ITokenProvider token
         {
             foreach (var row in rowsElement.EnumerateArray())
             {
+                if (row.ValueKind == JsonValueKind.Object)
+                {
+                    throw new UserFacingException(ExecutionFailureMessage);
+                }
+
                 if (row.ValueKind != JsonValueKind.Array)
                 {
                     continue;
