@@ -18,6 +18,9 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Setup Windows storage
+      uses: ./.github/actions/setup-windows-storage
+
     - name: Setup .NET
       uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
       with:

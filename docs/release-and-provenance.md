@@ -61,57 +61,6 @@ when dispatching `publish-release.yml`.
 
 ## Workflow architecture
 
-### Windows storage experiment
-
-`.github/workflows/benchmark-windows-storage.yml` is an isolated experiment,
-triggered manually or by changes to its workflow/setup script on
-`benchmark-windows-storage`. It does not publish releases or change production
-CI. Each configuration publishes and packages both Windows RIDs on fresh
-`windows-latest` runners, with three independent samples per RID:
-
-- `default`: existing workspace, temporary directories, and NuGet locations.
-- `relocated`: existing workspace, with temporary directories and NuGet caches
-  moved onto the workspace drive.
-- `devdrive`: source checkout, temporary directories, and NuGet caches on a new
-  50 GiB ReFS Dev Drive VHD stored on the workspace drive.
-
-The experiment never reformats an existing runner volume or changes Defender
-exclusions. The VHD and benchmark files are discarded with the hosted runner.
-Measurements and storage diagnostics are uploaded as `storage-*` artifacts.
-Compare hardware-matched samples: the same runner label can supply different
-disk types. The VHD adds overhead, and its Defender treatment may differ from
-the default workspace drive; it is not equivalent to a native NVMe partition.
-Compare complete job durations as well as the recorded publish/packaging and
-storage-setup timings, which exclude checkout, SDK setup, and artifact upload.
-NuGet caches are not restored between jobs. This measures cold native publishes,
-not solution build/test performance or native Windows ARM64 execution.
-
-#### Initial measurements
-
-[Run 39522000301](https://github.com/DamianEdwards/kusto-cli/actions/runs/39522000301)
-completed all 18 jobs successfully on October 21, 2026 (UTC). Every original
-workspace volume was NTFS. Both SAS-backed 150 GiB and NVMe-backed 220 GiB
-workspace disks appeared under `windows-latest`; NVMe is not guaranteed.
-Every created ReFS volume was reported as a trusted Dev Drive with the Defender
-filter attached.
-
-Median seconds across three fresh runners per configuration and RID:
-
-| Storage | ARM64 publish/package | ARM64 setup + publish | x64 publish/package | x64 setup + publish |
-| --- | ---: | ---: | ---: | ---: |
-| Default | 92.85 | 106.29 | 97.03 | 104.65 |
-| Relocated temp/NuGet | 70.65 | 79.68 | 82.80 | 92.48 |
-| ReFS Dev Drive VHD | 81.19 | 95.63 | 78.31 | 92.27 |
-
-Median complete job durations were 132/113/128 seconds for ARM64 and
-142/107/134 seconds for x64 (default/relocated/devdrive respectively).
-The initial results favor relocating temporary files and NuGet caches without
-introducing a VHD. The VHD did not consistently improve on relocation after
-setup overhead. These are preliminary observations, not controlled speedup
-guarantees: disk assignments were mixed, there were only three samples per
-configuration, and SDK installation and network activity also varied.
-Production workflows remain unchanged.
-
 ### Pull request validation
 
 `.github/workflows/pr.yml` runs:
