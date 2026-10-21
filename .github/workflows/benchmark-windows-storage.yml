@@ -1,0 +1,87 @@
+name: Benchmark Windows Storage
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [benchmark-windows-storage]
+    paths:
+      - '.github/workflows/benchmark-windows-storage.yml'
+      - 'scripts/Initialize-StorageBenchmark.ps1'
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        storage: [default, relocated, devdrive]
+        rid: [win-x64, win-arm64]
+        sample: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Initialize storage comparison
+        id: storage
+        shell: pwsh
+        run: ./scripts/Initialize-StorageBenchmark.ps1 -Mode '${{ matrix.storage }}'
+      - name: Setup .NET
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
+        with:
+          dotnet-version: '10.0.x'
+      - name: Measure native publish and packaging
+        working-directory: ${{ steps.storage.outputs.workspace }}
+        shell: pwsh
+        env:
+          BENCHMARK_RID: ${{ matrix.rid }}
+          BENCHMARK_SAMPLE: ${{ matrix.sample }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $resultPath = Join-Path $env:RUNNER_TEMP 'storage-benchmark\result.json'
+          $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+          $timer = [Diagnostics.Stopwatch]::StartNew()
+          try {
+            ./scripts/Publish-NativeAsset.ps1 -RuntimeIdentifier $env:BENCHMARK_RID -Version '0.0.0-storage-benchmark' -ArtifactsDirectory './artifacts/storage-benchmark'
+            $result | Add-Member status 'success'
+          }
+          catch {
+            $result | Add-Member status 'failed'
+            throw
+          }
+          finally {
+            $timer.Stop()
+            $result | Add-Member runtimeIdentifier $env:BENCHMARK_RID
+            $result | Add-Member sample ([int]$env:BENCHMARK_SAMPLE)
+            $result | Add-Member publishSeconds $timer.Elapsed.TotalSeconds
+            $result | Add-Member storageAndPublishSeconds ($result.setupSeconds + $timer.Elapsed.TotalSeconds)
+            $result | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $resultPath
+            @(
+              "## $($result.mode): $env:BENCHMARK_RID, sample $env:BENCHMARK_SAMPLE"
+              ''
+              "| Measurement | Value |"
+              "| --- | --- |"
+              "| Storage setup | $([Math]::Round($result.setupSeconds, 2)) s |"
+              "| Publish and packaging | $([Math]::Round($result.publishSeconds, 2)) s |"
+              "| Storage setup + publish | $([Math]::Round($result.storageAndPublishSeconds, 2)) s |"
+              "| Result | $($result.status) |"
+              ''
+              'Hardware, filesystem, paths, and Defender configuration are in result.json.'
+            ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          }
+      - name: Upload measurements
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: storage-${{ matrix.storage }}-${{ matrix.rid }}-${{ matrix.sample }}
+          path: ${{ runner.temp }}/storage-benchmark/*
+          if-no-files-found: error
+          retention-days: 14

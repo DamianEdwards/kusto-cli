@@ -61,6 +61,31 @@ when dispatching `publish-release.yml`.
 
 ## Workflow architecture
 
+### Windows storage experiment
+
+`.github/workflows/benchmark-windows-storage.yml` is an isolated experiment,
+triggered manually or by changes to its workflow/setup script on
+`benchmark-windows-storage`. It does not publish releases or change production
+CI. Each configuration publishes and packages both Windows RIDs on fresh
+`windows-latest` runners, with three independent samples per RID:
+
+- `default`: existing workspace, temporary directories, and NuGet locations.
+- `relocated`: existing workspace, with temporary directories and NuGet caches
+  moved onto the workspace drive.
+- `devdrive`: source checkout, temporary directories, and NuGet caches on a new
+  50 GiB ReFS Dev Drive VHD stored on the workspace drive.
+
+The experiment never reformats an existing runner volume or changes Defender
+exclusions. The VHD and benchmark files are discarded with the hosted runner.
+Measurements and storage diagnostics are uploaded as `storage-*` artifacts.
+Compare hardware-matched samples: the same runner label can supply different
+disk types. The VHD adds overhead, and its Defender treatment may differ from
+the default workspace drive; it is not equivalent to a native NVMe partition.
+Compare complete job durations as well as the recorded publish/packaging and
+storage-setup timings, which exclude checkout, SDK setup, and artifact upload.
+NuGet caches are not restored between jobs. This measures cold native publishes,
+not solution build/test performance or native Windows ARM64 execution.
+
 ### Pull request validation
 
 `.github/workflows/pr.yml` runs:
