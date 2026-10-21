@@ -27,6 +27,18 @@ public sealed class UpdateCheckProcessTests
     }
 
     [Fact]
+    public async Task WaitForCachedVersion_ReadsWithoutAcquiringWriterLock()
+    {
+        using var fixture = new ProcessFixture();
+        var cache = new UpdateCheckCache(fixture.CachePath, NullLogger.Instance);
+        using var lease = cache.TryAcquireLock();
+        Assert.NotNull(lease);
+        Assert.True(cache.Save("9999.0.0", DateTimeOffset.UtcNow));
+
+        await fixture.WaitForCachedVersionAsync("9999.0.0");
+    }
+
+    [Fact]
     public async Task FailedCommand_PrintsReminderAfterErrorAndLogs()
     {
         using var fixture = new ProcessFixture();
@@ -175,12 +187,10 @@ public sealed class UpdateCheckProcessTests
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             while (true)
             {
-                using (var lease = cache.TryAcquireLock())
+                // Cache writes are atomic; taking the writer lock can make the background check skip.
+                if (cache.ReadVersion() == version)
                 {
-                    if (lease is not null && cache.ReadVersion() == version)
-                    {
-                        return;
-                    }
+                    return;
                 }
                 await Task.Delay(20, timeout.Token);
             }
