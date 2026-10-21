@@ -1,0 +1,23 @@
+name: Setup Windows Storage
+description: Move Windows temporary files and NuGet caches to the runner's D drive.
+
+runs:
+  using: composite
+  steps:
+    - name: Configure temporary files and NuGet caches
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $paths = [ordered]@{
+          TEMP = 'D:\kusto-temp'
+          TMP = 'D:\kusto-temp'
+          NUGET_PACKAGES = 'D:\kusto-nuget\packages'
+          NUGET_HTTP_CACHE_PATH = 'D:\kusto-nuget\http-cache'
+          NUGET_SCRATCH = 'D:\kusto-nuget\scratch'
+          NUGET_PLUGINS_CACHE_PATH = 'D:\kusto-nuget\plugins-cache'
+        }
+        foreach ($entry in $paths.GetEnumerator()) {
+          New-Item -ItemType Directory -Path $entry.Value -Force | Out-Null
+          "$($entry.Key)=$($entry.Value)" | Add-Content -LiteralPath $env:GITHUB_ENV
+        }
